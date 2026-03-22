@@ -2,7 +2,7 @@
 
 MiSTerClaw is the first MCP server for MiSTer-FPGA. Control your MiSTer from any AI agent.
 
-![Version](https://img.shields.io/badge/Version-v0.3.0-blue)
+![Version](https://img.shields.io/badge/Version-v0.4.0-blue)
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-ARMv7_(DE10--Nano)-blue)
@@ -54,6 +54,8 @@ Add MiSTerClaw to your MCP client config:
 | `mister_osd_visible` | Show only visible OSD menu items based on current config |
 | `mister_cfg_read` | Read core settings (options + DIP switches) |
 | `mister_cfg_write` | Modify core settings with automatic backup |
+| `mister_reload` | Reload current core to apply config changes |
+| `mister_rescan` | Rescan ROM library (optionally for specific drive) |
 | `mister_tailscale` | Manage Tailscale VPN |
 | `mister_shell` | Execute shell commands |
 
@@ -189,7 +191,7 @@ The MCP server and CLI client communicate with the MiSTer over the ClawExec prot
 
 ## Dynamic System Detection
 
-MiSTerClaw auto-detects all systems by scanning ROM folders, installed cores, and MGL files. No configuration needed — a well-stocked MiSTer typically has 70+ systems. Discovery runs in the background at server startup and results are cached in memory.
+MiSTerClaw auto-detects all systems by scanning ROM folders, installed cores, and MGL files. No configuration needed — a well-stocked MiSTer typically has 70+ systems. Discovery results (including full ROM file listings) are cached to disk. First startup scans and builds the cache; subsequent starts load instantly. Use the `rescan` command after adding new games or drives.
 
 ## Building from Source
 
