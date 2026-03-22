@@ -144,6 +144,13 @@ misterclaw-send -H mister-fpga cfg-read
 # Modify settings
 misterclaw-send -H mister-fpga cfg-write --option "Free Play" --value On
 
+# Reload core to apply changes
+misterclaw-send -H mister-fpga reload
+
+# Rescan ROM library (after adding new games)
+misterclaw-send -H mister-fpga rescan
+misterclaw-send -H mister-fpga rescan --location usb0
+
 # JSON output for scripting
 misterclaw-send -H mister-fpga status --json
 misterclaw-send -H mister-fpga systems --json
