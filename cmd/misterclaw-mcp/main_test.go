@@ -123,6 +123,7 @@ func TestHandleToolsList(t *testing.T) {
 		"mister_osd_visible": false,
 		"mister_cfg_read":    false,
 		"mister_cfg_write":   false,
+		"mister_reload":      false,
 	}
 
 	for _, tool := range tools {
@@ -359,7 +360,7 @@ func TestFullRoundTrip(t *testing.T) {
 	result, _ = parsed["result"].(map[string]interface{})
 
 	tools, _ := result["tools"].([]interface{})
-	if len(tools) != 13 {
-		t.Errorf("expected 13 tools, got %d", len(tools))
+	if len(tools) != 14 {
+		t.Errorf("expected 14 tools, got %d", len(tools))
 	}
 }

@@ -642,6 +642,9 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 	case "cfg_write":
 		s.handleCFGWrite(req, send)
 
+	case "reload":
+		s.handleReload(req, send)
+
 	default:
 		send(map[string]interface{}{
 			"error": fmt.Sprintf("unknown mister command: %s", req.MiSTer),
@@ -672,16 +675,22 @@ func extractCoreName(name string) string {
 // coreContext holds all resolved state for the current core: OSD info, CFG data, DIP data, paths.
 
 // reloadCurrentCore reloads the currently running core/game so config changes take effect.
-func (s *Server) reloadCurrentCore() {
+func (s *Server) handleReload(req Request, send func(interface{})) {
 	status, err := mister.GetRunningCore()
 	if err != nil || status == nil {
+		send(map[string]interface{}{"mister": "reload", "success": false, "error": "no core running"})
 		return
 	}
-	if status.GamePath != "" {
-		mister.LoadCore(status.GamePath)
-	} else if status.CorePath != "" {
-		mister.LoadCore(status.CorePath)
+	path := status.GamePath
+	if path == "" {
+		path = status.CorePath
 	}
+	if path == "" {
+		send(map[string]interface{}{"mister": "reload", "success": false, "error": "no core path found"})
+		return
+	}
+	mister.LoadCore(path)
+	send(map[string]interface{}{"mister": "reload", "success": true, "path": path})
 }
 type coreContext struct {
 	OSD     *mister.CoreOSD
@@ -885,9 +894,6 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 			return
 		}
 
-		// Reload current core so settings take effect
-		s.reloadCurrentCore()
-
 		send(map[string]interface{}{
 			"mister":      "cfg_write",
 			"success":     true,
@@ -897,7 +903,7 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 			"value_index": valIdx,
 			"cfg_path":    ctx.CFGPath,
 			"source":      "cfg",
-			"reloaded":    true,
+			"reload_required": true,
 		})
 		return
 	}
@@ -928,9 +934,6 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 				return
 			}
 
-			// Reload current core so settings take effect
-			s.reloadCurrentCore()
-
 			send(map[string]interface{}{
 				"mister":      "cfg_write",
 				"success":     true,
@@ -940,7 +943,7 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 				"value_index": valIdx,
 				"dip_path":    ctx.DIPPath,
 				"source":      "dip",
-				"reloaded":    true,
+				"reload_required": true,
 			})
 			return
 		}

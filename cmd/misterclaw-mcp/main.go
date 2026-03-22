@@ -283,7 +283,7 @@ func toolsList() []ToolDef {
 		},
 		{
 			Name:        "mister_cfg_write",
-			Description: "Set a core option by name and value. Automatically backs up the CFG file before writing. Use cfg_read first to see available options and their current values. Example: option='Free Play', value='On'.",
+			Description: "Set a core option by name and value. Automatically backs up the CFG file before writing. Use cfg_read first to see available options and their current values. Example: option='Free Play', value='On'. After writing, use mister_reload to apply changes.",
 			InputSchema: map[string]interface{}{
 				"type":     "object",
 				"required": []string{"option", "value"},
@@ -291,6 +291,14 @@ func toolsList() []ToolDef {
 					"option": map[string]interface{}{"type": "string", "description": "Option name (e.g. 'Aspect Ratio', 'Free Play', 'Region')"},
 					"value":  map[string]interface{}{"type": "string", "description": "Value name (e.g. 'Original', 'On', 'US')"},
 				},
+			},
+		},
+		{
+			Name:        "mister_reload",
+			Description: "Reload the current core on MiSTer-FPGA. Use after changing settings with mister_cfg_write to apply changes.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
 			},
 		},
 	}
@@ -424,6 +432,9 @@ func callTool(params json.RawMessage) MCPToolResult {
 			"value":  value,
 		}
 		return doMisterCommand(req, formatCFGWrite)
+
+	case "mister_reload":
+		return doMisterCommand(map[string]interface{}{"mister": "reload"}, formatReload)
 
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", p.Name))
@@ -843,7 +854,21 @@ func formatCFGWrite(resp map[string]interface{}) MCPToolResult {
 	value, _ := resp["value"].(string)
 	cfgPath, _ := resp["cfg_path"].(string)
 
-	return textResult(fmt.Sprintf("Set %s = %s\nWritten to: %s (backup created)", option, value, cfgPath))
+	text := fmt.Sprintf("Set %s = %s\nWritten to: %s (backup created)", option, value, cfgPath)
+	if reload, ok := resp["reload_required"].(bool); ok && reload {
+		text += "\nReload required — use mister_reload to apply changes."
+	}
+	return textResult(text)
+}
+
+func formatReload(resp map[string]interface{}) MCPToolResult {
+	if success, ok := resp["success"].(bool); ok && !success {
+		errMsg, _ := resp["error"].(string)
+		return errorResult(errMsg)
+	}
+
+	path, _ := resp["path"].(string)
+	return textResult(fmt.Sprintf("Reloaded: %s", path))
 }
 
 // Result helpers

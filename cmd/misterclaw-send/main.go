@@ -83,6 +83,8 @@ func main() {
 		err = cmdCFGRead(cmdArgs)
 	case "cfg-write":
 		err = cmdCFGWrite(cmdArgs)
+	case "reload":
+		err = cmdReload()
 	case "discover":
 		err = cmdDiscover()
 	case "help":
@@ -826,6 +828,25 @@ func cmdCFGWrite(args []string) error {
 	cfgPath, _ := resp["cfg_path"].(string)
 	fmt.Printf("Set %s = %s\n", option, value)
 	fmt.Printf("Written to: %s (backup created)\n", cfgPath)
+	if reload, ok := resp["reload_required"].(bool); ok && reload {
+		fmt.Println("(reload core to apply)")
+	}
+	return nil
+}
+
+func cmdReload() error {
+	resp, err := sendRequest(map[string]interface{}{"mister": "reload"})
+	if err != nil {
+		return err
+	}
+
+	if jsonFlag {
+		outputJSON(resp)
+		return nil
+	}
+
+	path, _ := resp["path"].(string)
+	fmt.Printf("Reloaded: %s\n", path)
 	return nil
 }
 
@@ -850,6 +871,7 @@ COMMANDS:
   osd-visible   Show only visible OSD menu items (based on CFG state)
   cfg-read      Read current CFG file and decode option values
   cfg-write     Set a core option by name (with automatic backup)
+  reload        Reload current core (apply config changes)
   tailscale     Tailscale VPN management (setup/status/start/stop)
   shell         Execute shell command on MiSTer-FPGA
   discover      Scan local network for MiSTer-FPGA servers
@@ -880,6 +902,7 @@ EXAMPLES:
   misterclaw-send osd-visible
   misterclaw-send cfg-read
   misterclaw-send cfg-write --option "Free Play" --value On
+  misterclaw-send -H mister-fpga reload
   misterclaw-send shell "ls /media/fat/games/"
 
 AGENT NOTES:
@@ -1037,6 +1060,8 @@ func BuildRequest(cmd string, args []string) (map[string]interface{}, error) {
 			"option": optionName,
 			"value":  valueName,
 		}, nil
+	case "reload":
+		return map[string]interface{}{"mister": "reload"}, nil
 	case "tailscale":
 		if len(args) == 0 {
 			return nil, fmt.Errorf("tailscale requires an action")
