@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-func TestSystemMapCompleteness(t *testing.T) {
+func TestSystemDefaultsCompleteness(t *testing.T) {
 	// Every system must have a core, at least one extension, and valid type
-	for name, cfg := range systemMap {
+	for name, cfg := range systemDefaults {
 		if cfg.Core == "" {
 			t.Errorf("system %s has empty Core", name)
 		}

@@ -22,7 +22,7 @@ type SystemConfig struct {
 type GameInfo struct {
 	Name     string `json:"name"`     // filename without extension
 	Path     string `json:"path"`     // full absolute path
-	System   string `json:"system"`   // system key from systemMap
+	System   string `json:"system"`   // system name (from discovery or systemDefaults)
 	Location string `json:"location"` // "sd" or "usb0" etc.
 }
 
@@ -33,7 +33,7 @@ type SystemStats struct {
 	Location string `json:"location"`
 }
 
-var systemMap = map[string]SystemConfig{
+var systemDefaults = map[string]SystemConfig{
 	// === Consoles ===
 	"Gameboy":         {Core: "_Console/Gameboy", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gb"}},
 	"GBC":             {Core: "_Console/Gameboy", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gbc"}, SetName: "GBC"},
@@ -97,70 +97,16 @@ var systemMap = map[string]SystemConfig{
 	"PET":         {Core: "_Computer/PET2001", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg"}},
 }
 
-// extensionToSystems maps lowercase extensions to the system names that use them.
-// Built once at init from systemMap.
-var extensionToSystems map[string][]string
-
-func init() {
-	extensionToSystems = make(map[string][]string)
-	for name, cfg := range systemMap {
-		for _, ext := range cfg.Extensions {
-			extensionToSystems[ext] = append(extensionToSystems[ext], name)
-		}
-	}
-}
-
 // GetSystemConfig returns the config for a system name (case-insensitive).
+// Checks discovered systems first, then falls back to systemDefaults.
 func GetSystemConfig(system string) (SystemConfig, bool) {
-	for name, cfg := range systemMap {
-		if strings.EqualFold(name, system) {
-			return cfg, true
-		}
+	// Check discovered systems first
+	discovered := getDiscoveredSystems()
+	if ds, ok := discovered[strings.ToLower(system)]; ok {
+		return ds.Config, true
 	}
-	return SystemConfig{}, false
-}
-
-// romSearchPaths returns all directories to scan for a given system.
-func romSearchPaths(system string) []struct {
-	Dir      string
-	Location string
-} {
-	var paths []struct {
-		Dir      string
-		Location string
-	}
-
-	// SD card
-	paths = append(paths, struct {
-		Dir      string
-		Location string
-	}{filepath.Join("/media/fat/games", system), "sd"})
-
-	// USB drives 0-7
-	for i := 0; i <= 7; i++ {
-		loc := fmt.Sprintf("usb%d", i)
-		paths = append(paths, struct {
-			Dir      string
-			Location string
-		}{filepath.Join(fmt.Sprintf("/media/%s", loc), system), loc})
-	}
-
-	return paths
-}
-
-// findSystemDir does a case-insensitive search for a system's ROM directory
-// under a given parent path. Returns the actual path found, or empty string.
-func findSystemDir(parent, system string) string {
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if e.IsDir() && strings.EqualFold(e.Name(), system) {
-			return filepath.Join(parent, e.Name())
-		}
-	}
-	return ""
+	// Fall back to systemDefaults
+	return getDefaultConfig(system)
 }
 
 // scanDir walks a directory and collects ROM files matching the given extensions.
@@ -185,64 +131,58 @@ func scanDir(dir, system, location string, extensions map[string]bool) []GameInf
 	return games
 }
 
-// ScanSystem scans ROM directories for a single system.
+// ScanSystem scans ROM directories for a single system using discovered folders.
 func ScanSystem(system string) []GameInfo {
-	cfg, ok := GetSystemConfig(system)
+	discovered := getDiscoveredSystems()
+	ds, ok := discovered[strings.ToLower(system)]
 	if !ok {
 		return nil
 	}
 
-	extSet := make(map[string]bool, len(cfg.Extensions))
-	for _, ext := range cfg.Extensions {
+	extSet := make(map[string]bool, len(ds.Config.Extensions))
+	for _, ext := range ds.Config.Extensions {
 		extSet[ext] = true
 	}
 
 	var all []GameInfo
-
-	// SD card - case-insensitive lookup
-	if dir := findSystemDir("/media/fat/games", system); dir != "" {
-		all = append(all, scanDir(dir, system, "sd", extSet)...)
+	for _, folder := range ds.Folders {
+		all = append(all, scanDir(folder.Path, ds.Name, folder.Location, extSet)...)
 	}
+	return all
+}
 
-	// USB drives 0-7
-	for i := 0; i <= 7; i++ {
-		parent := fmt.Sprintf("/media/usb%d", i)
-		if dir := findSystemDir(parent, system); dir != "" {
-			loc := fmt.Sprintf("usb%d", i)
-			all = append(all, scanDir(dir, system, loc, extSet)...)
+// ScanROMs scans all discovered systems across all ROM locations.
+func ScanROMs() []GameInfo {
+	discovered := getDiscoveredSystems()
+	var all []GameInfo
+	for _, ds := range discovered {
+		extSet := make(map[string]bool, len(ds.Config.Extensions))
+		for _, ext := range ds.Config.Extensions {
+			extSet[ext] = true
+		}
+		for _, folder := range ds.Folders {
+			all = append(all, scanDir(folder.Path, ds.Name, folder.Location, extSet)...)
 		}
 	}
-
 	return all
 }
 
-// ScanROMs scans all known systems across all ROM locations.
-func ScanROMs() []GameInfo {
-	var all []GameInfo
-	for system := range systemMap {
-		all = append(all, ScanSystem(system)...)
-	}
-	return all
-}
-
-// GetSystemStats returns ROM counts per system.
+// GetSystemStats returns ROM counts per system from the discovery cache.
 func GetSystemStats() []SystemStats {
+	discovered := getDiscoveredSystems()
 	var stats []SystemStats
-	for system := range systemMap {
-		games := ScanSystem(system)
-		if len(games) == 0 {
+	for _, ds := range discovered {
+		if ds.TotalROMs == 0 {
 			continue
 		}
-		// Group by location
-		locCounts := make(map[string]int)
-		for _, g := range games {
-			locCounts[g.Location] += 1
-		}
-		for loc, count := range locCounts {
+		for _, folder := range ds.Folders {
+			if folder.RomCount == 0 {
+				continue
+			}
 			stats = append(stats, SystemStats{
-				System:   system,
-				RomCount: count,
-				Location: loc,
+				System:   ds.Name,
+				RomCount: folder.RomCount,
+				Location: folder.Location,
 			})
 		}
 	}
@@ -299,7 +239,7 @@ type mglFileRef struct {
 // GenerateMGL generates MGL XML content for launching a game.
 func GenerateMGL(game GameInfo) string {
 	cfg, ok := GetSystemConfig(game.System)
-	if !ok {
+	if !ok || cfg.Core == "" {
 		return ""
 	}
 

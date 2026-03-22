@@ -370,13 +370,11 @@ clawexec-mister-fpga-send info --json
 
 ### System Names
 
-Supported system names for `--system` flag (case-insensitive):
+Systems are auto-detected from your ROM library. Any system with ROMs in `/media/fat/games/` or USB drives (`/media/usb0/` through `/media/usb7/`) is automatically available. System names match the folder names on disk (case-insensitive).
 
-**Consoles:** `SNES`, `NES`, `MegaDrive`, `Genesis`, `PSX`, `N64`, `Gameboy`, `GBA`, `GBC`, `SGB`, `SMS`, `MasterSystem`, `GameGear`, `TurboGrafx16`, `PCEngine`, `TGFX16CD`, `SuperGrafx`, `S32X`, `WonderSwan`, `WonderSwanColor`, `Atari2600`, `Atari5200`, `Atari7800`, `AtariLynx`, `ColecoVision`, `Intellivision`, `Odyssey2`, `Vectrex`, `ChannelF`, `MegaCD`, `NeoGeo`, `Saturn`, `Jaguar`, `NGP`, `PokemonMini`, `SG1000`
+Core matching is automatic: ROM folder names are matched to installed `.rbf` cores and `.mgl` mappings. Well-known systems (SNES, NES, Genesis, PSX, etc.) have curated MGL launch parameters built in as defaults. Unknown systems get sensible defaults — CD-based systems (with `.chd`/`.cue`/`.iso` files) are detected automatically.
 
-**Computers:** `Amiga`, `C64`, `C128`, `VIC20`, `AtariST`, `MSX`, `ZXSpectrum`, `ZX81`, `Amstrad`, `AmstradPCW`, `BBCMicro`, `ao486`, `PCXT`, `X68000`, `MacPlus`, `Archimedes`, `AppleI`, `AppleII`, `SAMCoupe`, `Altair8800`, `PDP1`, `PET`
-
-Note: `Genesis` and `MegaDrive` are interchangeable — both use the MegaDrive core. `SMS` and `MasterSystem` are interchangeable. `GBC` uses the Gameboy core. `GameGear` uses the SMS core. `PCEngine` and `TurboGrafx16` share the same core. Common systems are well-tested; exotic ones may need MGL parameter adjustments.
+Use `clawexec-mister-fpga-send systems` to see all detected systems and ROM counts.
 
 ### Error Handling
 
@@ -443,23 +441,16 @@ Once installed, you just talk to your AI agent:
 
 ```
 You: "Start Sonic 2 on the MiSTer"
-Agent: Launched Sonic The Hedgehog 2 (World) on MegaDrive!
+Agent: Launched Sonic The Hedgehog 2 on MegaDrive! 🦔
 
-You: "What's playing right now?"
-Agent: SNES core is running Super Mario World.
+You: "What's playing?"
+Agent: SNES core running Super Mario World.
 
 You: "Take a screenshot"
-Agent: [shows screenshot from MiSTer]
+Agent: [shows screenshot]
 
-You: "How much disk space is left?"
-Agent: Your MiSTer has 3 drives:
-  - SD Card: 8.5 GB free (97% full)
-  - USB Drive 1: 11 GB free
-  - USB Drive 2: basically full
-
-You: "Set up Tailscale so I can access it from anywhere"
-Agent: Done! Your MiSTer is now reachable at 100.101.202.25.
-       Here's the auth link: https://login.tailscale.com/a/xxx
+You: "Set up Tailscale"
+Agent: Done! MiSTer reachable at 100.101.202.25. Auth link: https://...
 ```
 
 Your agent reads the documentation above, picks the right commands, and handles everything. You just say what you want.
@@ -539,6 +530,7 @@ pkg/
   pty/executor.go                       PTY execution (creack/pty) + pipe fallback
   mister/
     cmd.go                              /dev/MiSTer_cmd interface (load_core, screenshots)
+    discover.go                         Dynamic system discovery (cores, MGLs, ROM folders)
     osd.go                              Framebuffer OSD rendering (8x16 bitmap font)
     games.go                            ROM filesystem scanner, search index, MGL generator
     screenshots.go                      Screenshot capture from /media/fat/screenshots/
