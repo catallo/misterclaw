@@ -372,9 +372,11 @@ clawexec-mister-fpga-send info --json
 
 Supported system names for `--system` flag (case-insensitive):
 
-`SNES`, `NES`, `MegaDrive`, `Genesis`, `PSX`, `N64`, `Gameboy`, `GBA`, `GBC`, `SMS`, `GameGear`, `TurboGrafx16`, `S32X`, `WonderSwan`, `WonderSwanColor`
+**Consoles:** `SNES`, `NES`, `MegaDrive`, `Genesis`, `PSX`, `N64`, `Gameboy`, `GBA`, `GBC`, `SGB`, `SMS`, `MasterSystem`, `GameGear`, `TurboGrafx16`, `PCEngine`, `TGFX16CD`, `SuperGrafx`, `S32X`, `WonderSwan`, `WonderSwanColor`, `Atari2600`, `Atari5200`, `Atari7800`, `AtariLynx`, `ColecoVision`, `Intellivision`, `Odyssey2`, `Vectrex`, `ChannelF`, `MegaCD`, `NeoGeo`, `Saturn`, `Jaguar`, `NGP`, `PokemonMini`, `SG1000`
 
-Note: `Genesis` and `MegaDrive` are interchangeable — both use the MegaDrive core. `GBC` uses the Gameboy core. `GameGear` uses the SMS core.
+**Computers:** `Amiga`, `C64`, `C128`, `VIC20`, `AtariST`, `MSX`, `ZXSpectrum`, `ZX81`, `Amstrad`, `AmstradPCW`, `BBCMicro`, `ao486`, `PCXT`, `X68000`, `MacPlus`, `Archimedes`, `AppleI`, `AppleII`, `SAMCoupe`, `Altair8800`, `PDP1`, `PET`
+
+Note: `Genesis` and `MegaDrive` are interchangeable — both use the MegaDrive core. `SMS` and `MasterSystem` are interchangeable. `GBC` uses the Gameboy core. `GameGear` uses the SMS core. `PCEngine` and `TurboGrafx16` share the same core. Common systems are well-tested; exotic ones may need MGL parameter adjustments.
 
 ### Error Handling
 
@@ -411,26 +413,18 @@ Error: connecting to mister-fpga:9900: dial tcp: lookup mister-fpga: no such hos
 
 ### What Is This?
 
-ClawExec for MiSTer-FPGA lets you remotely control your MiSTer-FPGA retro gaming device:
+ClawExec lets your AI agent control your MiSTer-FPGA. Search your game library, launch ROMs, take screenshots, check disk space, set up VPN access — all through natural conversation. You never need to learn CLI commands.
 
-- **Search and launch games** from your ROM library
-- **Take screenshots** of what's on screen
-- **Check system status** — temperature, RAM, disk usage
-- **Set up Tailscale VPN** so your MiSTer is reachable from anywhere
-- **Run shell commands** directly on the MiSTer
+### Setup
 
-It's a tiny server (~3 MB) that runs on MiSTer, and a CLI client you run on your computer. Zero configuration needed.
-
-### Quick Install
-
-**On MiSTer** (SSH in):
+**One-time install on MiSTer** (SSH in):
 ```bash
 wget -q https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-arm7 -O /tmp/clawexec-mister-fpga
 chmod +x /tmp/clawexec-mister-fpga
 /tmp/clawexec-mister-fpga --install
 ```
 
-**On your machine**:
+**Install the client** on your machine (your agent uses this behind the scenes):
 ```bash
 # Linux
 wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-send-linux-amd64 -O clawexec-mister-fpga-send
@@ -441,42 +435,34 @@ wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/cl
 chmod +x clawexec-mister-fpga-send
 ```
 
-To uninstall the server (removes autostart, keeps binary):
-```bash
-/media/fat/Scripts/clawexec-mister-fpga --uninstall
+To uninstall: `/media/fat/Scripts/clawexec-mister-fpga --uninstall`
+
+### What It Looks Like
+
+Once installed, you just talk to your AI agent:
+
+```
+You: "Start Sonic 2 on the MiSTer"
+Agent: Launched Sonic The Hedgehog 2 (World) on MegaDrive!
+
+You: "What's playing right now?"
+Agent: SNES core is running Super Mario World.
+
+You: "Take a screenshot"
+Agent: [shows screenshot from MiSTer]
+
+You: "How much disk space is left?"
+Agent: Your MiSTer has 3 drives:
+  - SD Card: 8.5 GB free (97% full)
+  - USB Drive 1: 11 GB free
+  - USB Drive 2: basically full
+
+You: "Set up Tailscale so I can access it from anywhere"
+Agent: Done! Your MiSTer is now reachable at 100.101.202.25.
+       Here's the auth link: https://login.tailscale.com/a/xxx
 ```
 
-### Basic Usage
-
-```bash
-# Check what's playing
-clawexec-mister-fpga-send status
-
-# Search for a game
-clawexec-mister-fpga-send search "zelda"
-
-# Launch a game
-clawexec-mister-fpga-send launch "super mario world" --system SNES
-
-# Take a screenshot
-clawexec-mister-fpga-send screenshot --output shot.png
-
-# System info
-clawexec-mister-fpga-send info
-
-# See available systems
-clawexec-mister-fpga-send systems
-```
-
-### Tailscale Setup
-
-Make your MiSTer reachable from anywhere with one command:
-
-```bash
-clawexec-mister-fpga-send tailscale setup
-```
-
-This downloads Tailscale, starts it, and gives you an auth URL. Open the URL in your browser to authenticate. After that, your MiSTer is reachable from anywhere on your Tailscale network — no `--host` flag needed.
+Your agent reads the documentation above, picks the right commands, and handles everything. You just say what you want.
 
 ---
 

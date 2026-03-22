@@ -46,10 +46,19 @@ func TestGetSystemConfig(t *testing.T) {
 		t.Errorf("Genesis core = %q, want _Console/MegaDrive", cfg.Core)
 	}
 
+	// Atari2600 should exist now
+	cfg, ok = GetSystemConfig("Atari2600")
+	if !ok {
+		t.Fatal("expected to find Atari2600")
+	}
+	if cfg.Core != "_Console/Atari2600" {
+		t.Errorf("Atari2600 core = %q, want _Console/Atari2600", cfg.Core)
+	}
+
 	// Unknown system
-	_, ok = GetSystemConfig("Atari2600")
+	_, ok = GetSystemConfig("FakeSystem999")
 	if ok {
-		t.Error("expected Atari2600 to not be found")
+		t.Error("expected FakeSystem999 to not be found")
 	}
 }
 
