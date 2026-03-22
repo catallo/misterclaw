@@ -359,11 +359,11 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 		})
 
 	case "search":
-		if !mister.IsDiscoveryReady() && mister.GetSystemStats() == nil {
+		if !mister.IsGamesReady() {
 			send(map[string]interface{}{
 				"mister":  "search",
 				"status":  "pending",
-				"message": "System discovery is still running. Try again in a few seconds.",
+				"message": "System discovery is still running. Please wait.",
 			})
 			return
 		}

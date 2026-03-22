@@ -47,6 +47,7 @@ type diskCache struct {
 	Version   int                          `json:"version"`
 	Timestamp string                       `json:"timestamp"`
 	Systems   map[string]*DiscoveredSystem `json:"systems"`
+	Games     map[string][]GameInfo        `json:"games,omitempty"` // key = lowercase system name
 }
 
 // Meta extensions excluded from ROM scanning.
@@ -66,10 +67,13 @@ var cdExtensions = map[string]bool{
 // Discovery cache with two-phase background scanning.
 // Phase 1 (fast): scan folder names, use systemDefaults extensions, top-level file counts.
 // Phase 2 (full): scanFolderExtensions for unknown systems, accurate ROM counts.
+// Phase 3 (games): collect all ROM file listings for instant search.
 var (
 	cachedSystems map[string]*DiscoveredSystem
-	cacheReady    bool // true after Phase 1 (commands work)
-	cacheComplete bool // true after Phase 2 (accurate counts)
+	cachedGames   map[string][]GameInfo // key = lowercase system name
+	cacheReady    bool                  // true after Phase 1 (commands work)
+	cacheComplete bool                  // true after Phase 2 (accurate counts)
+	gamesReady    bool                  // true after Phase 3 (game listings cached)
 	cacheScanning bool
 	cacheMu       sync.RWMutex
 )
@@ -86,13 +90,17 @@ func LoadCache() bool {
 		log.Printf("discovery: invalid cache file, will rescan: %v", err)
 		return false
 	}
-	if dc.Version != 1 || dc.Systems == nil {
+	if (dc.Version != 1 && dc.Version != 2) || dc.Systems == nil {
 		return false
 	}
 	cacheMu.Lock()
 	cachedSystems = dc.Systems
 	cacheReady = true
 	cacheComplete = true
+	if dc.Version == 2 && dc.Games != nil {
+		cachedGames = dc.Games
+		gamesReady = true
+	}
 	cacheMu.Unlock()
 	log.Printf("discovery: loaded %d systems from cache (%s)", len(dc.Systems), dc.Timestamp)
 	return true
@@ -102,14 +110,16 @@ func LoadCache() bool {
 func SaveCache() error {
 	cacheMu.RLock()
 	systems := cachedSystems
+	games := cachedGames
 	cacheMu.RUnlock()
 	if systems == nil {
 		return nil
 	}
 	dc := diskCache{
-		Version:   1,
+		Version:   2,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Systems:   systems,
+		Games:     games,
 	}
 	data, err := json.Marshal(dc)
 	if err != nil {
@@ -144,13 +154,36 @@ func StartDiscovery() {
 	cacheScanning = true
 	cacheReady = false
 	cacheComplete = false
+	gamesReady = false
 	cacheMu.Unlock()
 
 	// Try loading from disk cache first
 	if LoadCache() {
-		cacheMu.Lock()
-		cacheScanning = false
-		cacheMu.Unlock()
+		cacheMu.RLock()
+		hasGames := gamesReady
+		cacheMu.RUnlock()
+		if hasGames {
+			cacheMu.Lock()
+			cacheScanning = false
+			cacheMu.Unlock()
+			return
+		}
+		// v1 cache loaded (no games) — collect games in background
+		go func() {
+			cacheMu.RLock()
+			systems := cachedSystems
+			cacheMu.RUnlock()
+			games := collectAllGames(systems)
+			cacheMu.Lock()
+			cachedGames = games
+			gamesReady = true
+			cacheScanning = false
+			cacheMu.Unlock()
+			if err := SaveCache(); err != nil {
+				log.Printf("discovery: failed to save cache: %v", err)
+			}
+			log.Printf("discovery: collected game listings for %d systems", len(games))
+		}()
 		return
 	}
 
@@ -161,16 +194,24 @@ func StartDiscovery() {
 	cacheReady = true
 	cacheMu.Unlock()
 
-	// Phase 2: full discovery in background
+	// Phase 2: full discovery + Phase 3: game collection in background
 	go func() {
 		discoverSystemsFull(systems)
 		cacheMu.Lock()
 		cacheComplete = true
+		cacheMu.Unlock()
+
+		// Phase 3: collect all game file listings
+		games := collectAllGames(systems)
+		cacheMu.Lock()
+		cachedGames = games
+		gamesReady = true
 		cacheScanning = false
 		cacheMu.Unlock()
 		if err := SaveCache(); err != nil {
 			log.Printf("discovery: failed to save cache: %v", err)
 		}
+		log.Printf("discovery: collected game listings for %d systems", len(games))
 	}()
 }
 
@@ -202,7 +243,9 @@ func InvalidateCache() {
 	cacheMu.Lock()
 	cacheReady = false
 	cacheComplete = false
+	gamesReady = false
 	cachedSystems = nil
+	cachedGames = nil
 	cacheScanning = false
 	cacheMu.Unlock()
 	StartDiscovery()
@@ -313,6 +356,16 @@ func RescanLocation(location string) int {
 		ds.TotalROMs += count
 		systemsFound++
 	}
+	cacheMu.Unlock()
+
+	// Rebuild game listings for affected systems
+	cacheMu.RLock()
+	currentSystems := cachedSystems
+	cacheMu.RUnlock()
+	games := collectAllGames(currentSystems)
+	cacheMu.Lock()
+	cachedGames = games
+	gamesReady = true
 	cacheMu.Unlock()
 
 	// Save updated cache to disk
@@ -667,6 +720,60 @@ func discoverSystemsFull(systems map[string]*DiscoveredSystem) {
 		}
 	}
 	cacheMu.Unlock()
+}
+
+// IsGamesReady returns true after game listings have been collected and cached.
+func IsGamesReady() bool {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	return gamesReady
+}
+
+// getCachedGames returns the cached game listings.
+func getCachedGames() map[string][]GameInfo {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	return cachedGames
+}
+
+// collectAllGames scans all discovered systems and collects GameInfo entries.
+func collectAllGames(systems map[string]*DiscoveredSystem) map[string][]GameInfo {
+	games := make(map[string][]GameInfo)
+	cacheMu.RLock()
+	// Snapshot systems to avoid holding lock during I/O
+	type sysInfo struct {
+		key     string
+		name    string
+		folders []SystemFolder
+		exts    []string
+	}
+	var work []sysInfo
+	for key, ds := range systems {
+		folders := make([]SystemFolder, len(ds.Folders))
+		copy(folders, ds.Folders)
+		exts := make([]string, len(ds.Config.Extensions))
+		copy(exts, ds.Config.Extensions)
+		work = append(work, sysInfo{key: key, name: ds.Name, folders: folders, exts: exts})
+	}
+	cacheMu.RUnlock()
+
+	for _, w := range work {
+		if len(w.exts) == 0 {
+			continue
+		}
+		extSet := make(map[string]bool, len(w.exts))
+		for _, ext := range w.exts {
+			extSet[ext] = true
+		}
+		var sysGames []GameInfo
+		for _, folder := range w.folders {
+			sysGames = append(sysGames, scanDir(folder.Path, w.name, folder.Location, extSet)...)
+		}
+		if len(sysGames) > 0 {
+			games[w.key] = sysGames
+		}
+	}
+	return games
 }
 
 // discoverSystems performs full system discovery (used by tests that call it directly).

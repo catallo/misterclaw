@@ -657,9 +657,9 @@ func TestSaveAndLoadCache(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	// Wait for Phase 2 to complete and save cache
-	for i := 0; i < 100; i++ {
-		if IsDiscoveryComplete() {
+	// Wait for Phase 2+3 to complete and save cache
+	for i := 0; i < 200; i++ {
+		if IsGamesReady() {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -677,8 +677,8 @@ func TestSaveAndLoadCache(t *testing.T) {
 	if err := json.Unmarshal(data, &dc); err != nil {
 		t.Fatalf("cache file invalid JSON: %v", err)
 	}
-	if dc.Version != 1 {
-		t.Errorf("cache version = %d, want 1", dc.Version)
+	if dc.Version != 2 {
+		t.Errorf("cache version = %d, want 2", dc.Version)
 	}
 	if _, ok := dc.Systems["nes"]; !ok {
 		t.Error("cache missing NES system")
@@ -687,8 +687,10 @@ func TestSaveAndLoadCache(t *testing.T) {
 	// Clear in-memory cache, then load from disk
 	cacheMu.Lock()
 	cachedSystems = nil
+	cachedGames = nil
 	cacheReady = false
 	cacheComplete = false
+	gamesReady = false
 	cacheScanning = false
 	cacheMu.Unlock()
 
@@ -701,9 +703,16 @@ func TestSaveAndLoadCache(t *testing.T) {
 	if !IsDiscoveryComplete() {
 		t.Error("cacheComplete should be true after LoadCache")
 	}
+	if !IsGamesReady() {
+		t.Error("gamesReady should be true after LoadCache with v2 cache")
+	}
 	systems := getDiscoveredSystems()
 	if _, ok := systems["nes"]; !ok {
 		t.Error("NES not found after LoadCache")
+	}
+	games := getCachedGames()
+	if games == nil {
+		t.Error("games should not be nil after LoadCache with v2 cache")
 	}
 }
 
@@ -715,7 +724,7 @@ func TestStartDiscovery_UsesCache(t *testing.T) {
 
 	// Write a fake cache file
 	dc := diskCache{
-		Version:   1,
+		Version:   2,
 		Timestamp: "2026-01-01T00:00:00Z",
 		Systems: map[string]*DiscoveredSystem{
 			"fakesystem": {
@@ -726,6 +735,11 @@ func TestStartDiscovery_UsesCache(t *testing.T) {
 					{Path: "/fake/path", Location: "sd", RomCount: 42},
 				},
 				Config: SystemConfig{Core: "_Console/Fake"},
+			},
+		},
+		Games: map[string][]GameInfo{
+			"fakesystem": {
+				{Name: "FakeGame", Path: "/fake/path/FakeGame.bin", System: "FakeSystem", Location: "sd"},
 			},
 		},
 	}
@@ -751,8 +765,10 @@ func TestStartDiscovery_UsesCache(t *testing.T) {
 	// Clear and start discovery — should load from cache
 	cacheMu.Lock()
 	cachedSystems = nil
+	cachedGames = nil
 	cacheReady = false
 	cacheComplete = false
+	gamesReady = false
 	cacheScanning = false
 	cacheMu.Unlock()
 
@@ -761,11 +777,20 @@ func TestStartDiscovery_UsesCache(t *testing.T) {
 	if !IsDiscoveryReady() {
 		t.Error("should be ready immediately after loading cache")
 	}
+	if !IsGamesReady() {
+		t.Error("should have games ready immediately after loading v2 cache")
+	}
 	systems := getDiscoveredSystems()
 	if fs, ok := systems["fakesystem"]; !ok {
 		t.Error("FakeSystem not found — cache was not loaded")
 	} else if fs.TotalROMs != 42 {
 		t.Errorf("FakeSystem ROMs = %d, want 42", fs.TotalROMs)
+	}
+	games := getCachedGames()
+	if fg, ok := games["fakesystem"]; !ok {
+		t.Error("FakeSystem games not found — cache was not loaded")
+	} else if len(fg) != 1 {
+		t.Errorf("FakeSystem games = %d, want 1", len(fg))
 	}
 }
 

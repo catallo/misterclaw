@@ -189,19 +189,28 @@ func GetSystemStats() []SystemStats {
 	return stats
 }
 
-// SearchGames searches for games by name. Query terms are AND-matched (case-insensitive).
+// SearchGames searches for games by name using the cached game listings.
+// Query terms are AND-matched (case-insensitive).
 // If system is non-empty, results are limited to that system.
+// Returns nil if the game cache is not yet ready.
 func SearchGames(query string, system string) []GameInfo {
 	terms := strings.Fields(strings.ToLower(query))
 	if len(terms) == 0 {
 		return nil
 	}
 
+	games := getCachedGames()
+	if games == nil {
+		return nil
+	}
+
 	var source []GameInfo
 	if system != "" {
-		source = ScanSystem(system)
+		source = games[strings.ToLower(system)]
 	} else {
-		source = ScanROMs()
+		for _, sysGames := range games {
+			source = append(source, sysGames...)
+		}
 	}
 
 	var results []GameInfo
