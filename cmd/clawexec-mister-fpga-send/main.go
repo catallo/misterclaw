@@ -44,6 +44,11 @@ func main() {
 	cmd := args[0]
 	cmdArgs := args[1:]
 
+	// Resolve host via auto-discovery for commands that need a connection
+	if cmd != "help" && cmd != "discover" {
+		hostFlag = resolveHost(hostFlag, portFlag)
+	}
+
 	var err error
 	switch cmd {
 	case "status":
@@ -62,6 +67,8 @@ func main() {
 		err = cmdTailscale(cmdArgs)
 	case "shell":
 		err = cmdShell(cmdArgs)
+	case "discover":
+		err = cmdDiscover()
 	case "help":
 		printHelp()
 	default:
@@ -347,8 +354,6 @@ func cmdInfo() error {
 	temp, _ := resp["temp"].(float64)
 	ramMb, _ := resp["ram_mb"].(float64)
 	ramFree, _ := resp["ram_free_mb"].(float64)
-	diskTotal, _ := resp["disk_total_mb"].(float64)
-	diskFree, _ := resp["disk_free_mb"].(float64)
 	uptime, _ := resp["uptime"].(string)
 	ip, _ := resp["ip"].(string)
 	hostname, _ := resp["hostname"].(string)
@@ -357,7 +362,23 @@ func cmdInfo() error {
 	fmt.Printf("IP:       %s\n", ip)
 	fmt.Printf("Temp:     %.1f°C\n", temp)
 	fmt.Printf("RAM:      %d/%d MB free\n", int(ramFree), int(ramMb))
-	fmt.Printf("Disk:     %d/%d MB free\n", int(diskFree), int(diskTotal))
+
+	// Display all mounted disks
+	if disks, ok := resp["disks"].([]interface{}); ok {
+		for _, d := range disks {
+			disk, ok := d.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			mount, _ := disk["mount"].(string)
+			totalMb, _ := disk["total_mb"].(float64)
+			freeMb, _ := disk["free_mb"].(float64)
+			usePct, _ := disk["use_pct"].(string)
+			dev, _ := disk["device"].(string)
+			fmt.Printf("Disk:     %s — %d/%d MB free (%s used) [%s]\n", mount, int(freeMb), int(totalMb), usePct, dev)
+		}
+	}
+
 	fmt.Printf("Uptime:   %s\n", uptime)
 	return nil
 }
@@ -537,6 +558,7 @@ COMMANDS:
   info          System information
   tailscale     Tailscale VPN management (setup/status/start/stop)
   shell         Execute shell command on MiSTer-FPGA
+  discover      Scan local network for MiSTer-FPGA servers
   help          Show this help
 
 GLOBAL FLAGS:
@@ -561,6 +583,7 @@ EXAMPLES:
 AGENT NOTES:
   - Use --json for machine-parseable output on any command
   - Default host "mister-fpga" works if Tailscale is configured
+  - On LAN, --host is usually not needed — auto-discovery finds the MiSTer
   - Launch accepts fuzzy search queries; use --system to narrow results
   - Screenshot returns base64 PNG to stdout without --output
   - Tailscale setup is fully automated: setup → auth URL → poll → IP returned

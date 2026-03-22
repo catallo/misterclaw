@@ -16,7 +16,18 @@ func main() {
 	port := flag.Int("port", 9900, "TCP port to listen on")
 	host := flag.String("host", "0.0.0.0", "Host address to bind to")
 	shell := flag.String("shell", "/bin/bash", "Shell to use for command execution")
+	installFlag := flag.Bool("install", false, "Install binary and configure autostart, then exit")
+	uninstallFlag := flag.Bool("uninstall", false, "Remove autostart entry, then exit")
 	flag.Parse()
+
+	if *installFlag {
+		installServer(*port)
+		os.Exit(0)
+	}
+	if *uninstallFlag {
+		uninstallServer()
+		os.Exit(0)
+	}
 
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)

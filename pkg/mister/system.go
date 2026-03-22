@@ -14,11 +14,19 @@ type SystemInfo struct {
 	Temp        float64 `json:"temp"`
 	RAMMb       int     `json:"ram_mb"`
 	RAMFreeMb   int     `json:"ram_free_mb"`
-	DiskTotalMb int     `json:"disk_total_mb"`
-	DiskFreeMb  int     `json:"disk_free_mb"`
+	Disks       []DiskInfo `json:"disks"`
 	Uptime      string  `json:"uptime"`
 	IP          string  `json:"ip"`
 	Hostname    string  `json:"hostname"`
+}
+
+// DiskInfo holds info about a single mounted disk.
+type DiskInfo struct {
+	Mount   string `json:"mount"`
+	Device  string `json:"device"`
+	TotalMb int    `json:"total_mb"`
+	FreeMb  int    `json:"free_mb"`
+	UsePct  string `json:"use_pct"`
 }
 
 // GetSystemInfo reads system information from /proc and other sources.
@@ -26,7 +34,7 @@ func GetSystemInfo() SystemInfo {
 	info := SystemInfo{}
 	info.Temp = readCPUTemp()
 	info.RAMMb, info.RAMFreeMb = readMemInfo()
-	info.DiskTotalMb, info.DiskFreeMb = readDiskInfo()
+	info.Disks = readAllDisks()
 	info.Uptime = readUptime()
 	info.IP = readIP()
 	info.Hostname, _ = os.Hostname()
@@ -67,26 +75,33 @@ func readMemInfo() (totalMb, freeMb int) {
 	return
 }
 
-func readDiskInfo() (totalMb, freeMb int) {
-	out, err := exec.Command("df", "-m", "/media/fat").Output()
+func readAllDisks() []DiskInfo {
+	out, err := exec.Command("df", "-m").Output()
 	if err != nil {
-		// Fallback to root partition
-		out, err = exec.Command("df", "-m", "/").Output()
-		if err != nil {
-			return 0, 0
+		return nil
+	}
+	var disks []DiskInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n")[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 6 {
+			continue
 		}
+		mount := fields[5]
+		// Only include /media/* mounts (SD card, USB drives)
+		if !strings.HasPrefix(mount, "/media/") {
+			continue
+		}
+		totalMb, _ := strconv.Atoi(fields[1])
+		freeMb, _ := strconv.Atoi(fields[3])
+		disks = append(disks, DiskInfo{
+			Mount:   mount,
+			Device:  fields[0],
+			TotalMb: totalMb,
+			FreeMb:  freeMb,
+			UsePct:  fields[4],
+		})
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) < 2 {
-		return 0, 0
-	}
-	fields := strings.Fields(lines[len(lines)-1])
-	if len(fields) < 4 {
-		return 0, 0
-	}
-	totalMb, _ = strconv.Atoi(fields[1])
-	freeMb, _ = strconv.Atoi(fields[3])
-	return
+	return disks
 }
 
 func readUptime() string {

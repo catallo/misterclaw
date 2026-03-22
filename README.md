@@ -23,6 +23,30 @@ Remote control server and CLI client for MiSTer-FPGA retro gaming platforms.
 
 ## Features
 
+### Auto-Discovery
+
+On your local network, `--host` is usually not needed. The client automatically finds your MiSTer-FPGA:
+
+```bash
+# No --host needed on LAN — auto-discovers the MiSTer
+$ clawexec-mister-fpga-send status
+Host "mister-fpga" not reachable, scanning local network...
+Auto-discovered MiSTer-FPGA at 10.0.0.8
+Core: SNES
+Game: /media/fat/games/SNES/Super Mario World (USA).sfc
+
+# Explicitly scan for servers
+$ clawexec-mister-fpga-send discover
+Found 1 MiSTer-FPGA server(s):
+  10.0.0.8:9900 — Core: SNES_20250605
+
+# JSON output for scripts
+$ clawexec-mister-fpga-send discover --json
+[{"host":"10.0.0.8","port":9900,"core":"SNES_20250605"}]
+```
+
+When Tailscale is configured, the default hostname `mister-fpga` resolves directly and discovery is skipped.
+
 ### Launch Games
 
 Fuzzy search across your entire ROM library, filter by system, or use a direct path.
@@ -178,15 +202,18 @@ $ clawexec-mister-fpga-send shell "cat /proc/uptime" --json
 ### Server (on MiSTer-FPGA)
 
 ```bash
-# Download the latest release
-wget -q https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-arm7 -O /media/fat/Scripts/clawexec-mister-fpga
-chmod +x /media/fat/Scripts/clawexec-mister-fpga
+# Download to MiSTer and install
+wget -q https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-arm7 -O /tmp/clawexec-mister-fpga
+chmod +x /tmp/clawexec-mister-fpga
+/tmp/clawexec-mister-fpga --install
 
-# Add to autostart
-echo '[[ -e /media/fat/Scripts/clawexec-mister-fpga ]] && /media/fat/Scripts/clawexec-mister-fpga --port 9900 &' >> /media/fat/linux/user-startup.sh
+# That's it! Binary is copied to /media/fat/Scripts/ and autostart is configured.
+```
 
-# Start now
-/media/fat/Scripts/clawexec-mister-fpga --port 9900 &
+To uninstall (removes autostart entry, keeps binary):
+
+```bash
+/media/fat/Scripts/clawexec-mister-fpga --uninstall
 ```
 
 ### Client (on your machine)
@@ -216,9 +243,13 @@ go build -ldflags="-s -w" -o clawexec-mister-fpga-send ./cmd/clawexec-mister-fpg
 
 ## Tailscale VPN Setup
 
-Make your MiSTer-FPGA reachable from anywhere with one command:
+Make your MiSTer-FPGA reachable from anywhere with one command. On LAN, `--host` is usually not needed thanks to auto-discovery:
 
 ```bash
+# Auto-discovers the MiSTer on LAN — no --host needed
+clawexec-mister-fpga-send tailscale setup
+
+# Or specify explicitly
 clawexec-mister-fpga-send --host <mister-local-ip> tailscale setup
 ```
 
@@ -256,15 +287,15 @@ This section is for LLMs and AI agents that discover or use this tool.
 #### First-Time Setup
 
 ```bash
-# 1. Connect via LAN IP and set up Tailscale
-clawexec-mister-fpga-send --host 192.168.1.100 tailscale setup
+# 1. On LAN, auto-discovery finds the MiSTer — no --host needed
+clawexec-mister-fpga-send tailscale setup
 # → Returns auth URL — show it to the user
 
 # 2. After user authenticates, get the Tailscale IP
-clawexec-mister-fpga-send --host 192.168.1.100 tailscale status
+clawexec-mister-fpga-send tailscale status
 # → {"running": true, "ip": "100.92.156.99", "hostname": "mister-fpga", "online": true}
 
-# 3. From now on, use Tailscale hostname (no --host needed)
+# 3. From now on, Tailscale hostname or auto-discovery — no --host needed
 clawexec-mister-fpga-send status
 ```
 
