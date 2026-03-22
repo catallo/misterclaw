@@ -10,12 +10,12 @@ import (
 
 // SystemConfig defines how to launch games for a given system.
 type SystemConfig struct {
-	Core       string
-	Delay      int
-	Type       string // "f" or "s"
-	Index      int
-	Extensions []string
-	SetName    string // optional, for systems sharing a core (GBC, GameGear, etc.)
+	Core       string   `json:"core"`
+	Delay      int      `json:"delay"`
+	Type       string   `json:"type"`       // "f" or "s"
+	Index      int      `json:"index"`
+	Extensions []string `json:"extensions"`
+	SetName    string   `json:"set_name,omitempty"` // optional, for systems sharing a core (GBC, GameGear, etc.)
 }
 
 // GameInfo represents a single ROM file.

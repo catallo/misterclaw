@@ -1,20 +1,23 @@
 package mister
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // DiscoveredSystem represents a system found by scanning ROM folders on disk.
 type DiscoveredSystem struct {
 	Name      string         `json:"name"`
 	Folders   []SystemFolder `json:"folders"`
-	Config    SystemConfig   `json:"-"`
+	Config    SystemConfig   `json:"config"`
 	TotalROMs int            `json:"total_roms"`
 	HasCore   bool           `json:"has_core"`
 	NeedsScan bool           `json:"-"` // true if Phase 2 full scan is still needed
@@ -34,6 +37,17 @@ var (
 	consoleCoresPath  = "/media/fat/_Console"
 	computerCoresPath = "/media/fat/_Computer"
 )
+
+// CacheFilePath is the path to the persistent discovery cache file.
+// Override in tests to use a temp directory.
+var CacheFilePath = "/media/fat/config/misterclaw_cache.json"
+
+// diskCache is the JSON structure written to/read from disk.
+type diskCache struct {
+	Version   int                          `json:"version"`
+	Timestamp string                       `json:"timestamp"`
+	Systems   map[string]*DiscoveredSystem `json:"systems"`
+}
 
 // Meta extensions excluded from ROM scanning.
 var metaExtensions = map[string]bool{
@@ -60,8 +74,67 @@ var (
 	cacheMu       sync.RWMutex
 )
 
-// StartDiscovery begins two-phase system discovery. Call once at server startup.
-// Phase 1 runs synchronously (fast), Phase 2 runs in background.
+// LoadCache attempts to load the discovery cache from disk.
+// Returns true if cache was loaded successfully.
+func LoadCache() bool {
+	data, err := os.ReadFile(CacheFilePath)
+	if err != nil {
+		return false
+	}
+	var dc diskCache
+	if err := json.Unmarshal(data, &dc); err != nil {
+		log.Printf("discovery: invalid cache file, will rescan: %v", err)
+		return false
+	}
+	if dc.Version != 1 || dc.Systems == nil {
+		return false
+	}
+	cacheMu.Lock()
+	cachedSystems = dc.Systems
+	cacheReady = true
+	cacheComplete = true
+	cacheMu.Unlock()
+	log.Printf("discovery: loaded %d systems from cache (%s)", len(dc.Systems), dc.Timestamp)
+	return true
+}
+
+// SaveCache writes the current discovery cache to disk.
+func SaveCache() error {
+	cacheMu.RLock()
+	systems := cachedSystems
+	cacheMu.RUnlock()
+	if systems == nil {
+		return nil
+	}
+	dc := diskCache{
+		Version:   1,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Systems:   systems,
+	}
+	data, err := json.Marshal(dc)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(CacheFilePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(CacheFilePath, data, 0644); err != nil {
+		return err
+	}
+	log.Printf("discovery: saved %d systems to cache", len(systems))
+	return nil
+}
+
+// DeleteCacheFile removes the persistent cache file from disk.
+func DeleteCacheFile() {
+	os.Remove(CacheFilePath)
+}
+
+// StartDiscovery begins system discovery. Call once at server startup.
+// If a valid cache exists on disk, it is loaded and no scanning occurs.
+// Otherwise, Phase 1 runs synchronously (fast), Phase 2 runs in background
+// and saves the cache to disk when complete.
 func StartDiscovery() {
 	cacheMu.Lock()
 	if cacheScanning {
@@ -72,6 +145,14 @@ func StartDiscovery() {
 	cacheReady = false
 	cacheComplete = false
 	cacheMu.Unlock()
+
+	// Try loading from disk cache first
+	if LoadCache() {
+		cacheMu.Lock()
+		cacheScanning = false
+		cacheMu.Unlock()
+		return
+	}
 
 	// Phase 1: fast discovery (folder names + systemDefaults)
 	systems := discoverSystemsFast()
@@ -87,6 +168,9 @@ func StartDiscovery() {
 		cacheComplete = true
 		cacheScanning = false
 		cacheMu.Unlock()
+		if err := SaveCache(); err != nil {
+			log.Printf("discovery: failed to save cache: %v", err)
+		}
 	}()
 }
 
@@ -112,8 +196,9 @@ func getDiscoveredSystems() map[string]*DiscoveredSystem {
 	return cachedSystems
 }
 
-// InvalidateCache clears the discovery cache and triggers re-discovery.
+// InvalidateCache clears the discovery cache, deletes the cache file, and triggers re-discovery.
 func InvalidateCache() {
+	DeleteCacheFile()
 	cacheMu.Lock()
 	cacheReady = false
 	cacheComplete = false
@@ -184,7 +269,6 @@ func RescanLocation(location string) int {
 	systemsFound := 0
 
 	cacheMu.Lock()
-	defer cacheMu.Unlock()
 
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -228,6 +312,12 @@ func RescanLocation(location string) int {
 		})
 		ds.TotalROMs += count
 		systemsFound++
+	}
+	cacheMu.Unlock()
+
+	// Save updated cache to disk
+	if err := SaveCache(); err != nil {
+		log.Printf("discovery: failed to save cache after rescan: %v", err)
 	}
 
 	return systemsFound

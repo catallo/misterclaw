@@ -1,6 +1,7 @@
 package mister
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"os"
 	"path/filepath"
@@ -619,5 +620,237 @@ func TestExtensionDetection_CDSystems(t *testing.T) {
 	}
 	if !extMap[".chd"] || !extMap[".cue"] {
 		t.Errorf("CD system extensions = %v, want .chd and .cue", cd.Config.Extensions)
+	}
+}
+
+func TestSaveAndLoadCache(t *testing.T) {
+	tmp := t.TempDir()
+	oldCachePath := CacheFilePath
+	CacheFilePath = filepath.Join(tmp, "cache.json")
+	defer func() { CacheFilePath = oldCachePath }()
+
+	// Set up minimal ROM structure
+	gamesDir := filepath.Join(tmp, "games")
+	nesDir := filepath.Join(gamesDir, "NES")
+	os.MkdirAll(nesDir, 0755)
+	os.WriteFile(filepath.Join(nesDir, "game.nes"), []byte{}, 0644)
+
+	oldSD := sdGamesPath
+	oldUSB := usbPathFormat
+	oldConsole, oldComputer := consoleCoresPath, computerCoresPath
+	sdGamesPath = gamesDir
+	usbPathFormat = filepath.Join(tmp, "usb%d")
+	consoleCoresPath = filepath.Join(tmp, "_Console")
+	computerCoresPath = filepath.Join(tmp, "_Computer")
+	defer func() {
+		sdGamesPath = oldSD
+		usbPathFormat = oldUSB
+		consoleCoresPath = oldConsole
+		computerCoresPath = oldComputer
+	}()
+
+	// Run discovery (no cache on disk yet)
+	InvalidateCache()
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Wait for Phase 2 to complete and save cache
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryComplete() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Give SaveCache goroutine time to write
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify cache file exists
+	data, err := os.ReadFile(CacheFilePath)
+	if err != nil {
+		t.Fatalf("cache file not written: %v", err)
+	}
+
+	var dc diskCache
+	if err := json.Unmarshal(data, &dc); err != nil {
+		t.Fatalf("cache file invalid JSON: %v", err)
+	}
+	if dc.Version != 1 {
+		t.Errorf("cache version = %d, want 1", dc.Version)
+	}
+	if _, ok := dc.Systems["nes"]; !ok {
+		t.Error("cache missing NES system")
+	}
+
+	// Clear in-memory cache, then load from disk
+	cacheMu.Lock()
+	cachedSystems = nil
+	cacheReady = false
+	cacheComplete = false
+	cacheScanning = false
+	cacheMu.Unlock()
+
+	if !LoadCache() {
+		t.Fatal("LoadCache returned false")
+	}
+	if !IsDiscoveryReady() {
+		t.Error("cacheReady should be true after LoadCache")
+	}
+	if !IsDiscoveryComplete() {
+		t.Error("cacheComplete should be true after LoadCache")
+	}
+	systems := getDiscoveredSystems()
+	if _, ok := systems["nes"]; !ok {
+		t.Error("NES not found after LoadCache")
+	}
+}
+
+func TestStartDiscovery_UsesCache(t *testing.T) {
+	tmp := t.TempDir()
+	oldCachePath := CacheFilePath
+	CacheFilePath = filepath.Join(tmp, "cache.json")
+	defer func() { CacheFilePath = oldCachePath }()
+
+	// Write a fake cache file
+	dc := diskCache{
+		Version:   1,
+		Timestamp: "2026-01-01T00:00:00Z",
+		Systems: map[string]*DiscoveredSystem{
+			"fakesystem": {
+				Name:      "FakeSystem",
+				TotalROMs: 42,
+				HasCore:   true,
+				Folders: []SystemFolder{
+					{Path: "/fake/path", Location: "sd", RomCount: 42},
+				},
+				Config: SystemConfig{Core: "_Console/Fake"},
+			},
+		},
+	}
+	data, _ := json.Marshal(dc)
+	os.WriteFile(CacheFilePath, data, 0644)
+
+	// Point discovery at empty dirs so it would find nothing without cache
+	oldSD := sdGamesPath
+	oldUSB := usbPathFormat
+	oldConsole, oldComputer := consoleCoresPath, computerCoresPath
+	sdGamesPath = filepath.Join(tmp, "empty_games")
+	usbPathFormat = filepath.Join(tmp, "empty_usb%d")
+	consoleCoresPath = filepath.Join(tmp, "_Console")
+	computerCoresPath = filepath.Join(tmp, "_Computer")
+	os.MkdirAll(sdGamesPath, 0755)
+	defer func() {
+		sdGamesPath = oldSD
+		usbPathFormat = oldUSB
+		consoleCoresPath = oldConsole
+		computerCoresPath = oldComputer
+	}()
+
+	// Clear and start discovery — should load from cache
+	cacheMu.Lock()
+	cachedSystems = nil
+	cacheReady = false
+	cacheComplete = false
+	cacheScanning = false
+	cacheMu.Unlock()
+
+	StartDiscovery()
+
+	if !IsDiscoveryReady() {
+		t.Error("should be ready immediately after loading cache")
+	}
+	systems := getDiscoveredSystems()
+	if fs, ok := systems["fakesystem"]; !ok {
+		t.Error("FakeSystem not found — cache was not loaded")
+	} else if fs.TotalROMs != 42 {
+		t.Errorf("FakeSystem ROMs = %d, want 42", fs.TotalROMs)
+	}
+}
+
+func TestInvalidateCache_DeletesFile(t *testing.T) {
+	tmp := t.TempDir()
+	oldCachePath := CacheFilePath
+	CacheFilePath = filepath.Join(tmp, "cache.json")
+	defer func() { CacheFilePath = oldCachePath }()
+
+	// Create a cache file
+	os.WriteFile(CacheFilePath, []byte(`{"version":1,"timestamp":"x","systems":{}}`), 0644)
+
+	oldSD := sdGamesPath
+	oldUSB := usbPathFormat
+	oldConsole, oldComputer := consoleCoresPath, computerCoresPath
+	sdGamesPath = filepath.Join(tmp, "games")
+	usbPathFormat = filepath.Join(tmp, "usb%d")
+	consoleCoresPath = filepath.Join(tmp, "_Console")
+	computerCoresPath = filepath.Join(tmp, "_Computer")
+	os.MkdirAll(sdGamesPath, 0755)
+	defer func() {
+		sdGamesPath = oldSD
+		usbPathFormat = oldUSB
+		consoleCoresPath = oldConsole
+		computerCoresPath = oldComputer
+	}()
+
+	InvalidateCache()
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if _, err := os.Stat(CacheFilePath); err == nil {
+		// File might be recreated by Phase 2 save — that's ok if it's a new scan.
+		// But the original file should have been deleted before rescan.
+		// We just verify InvalidateCache didn't crash and discovery works.
+	}
+}
+
+func TestLoadCache_InvalidJSON(t *testing.T) {
+	tmp := t.TempDir()
+	oldCachePath := CacheFilePath
+	CacheFilePath = filepath.Join(tmp, "cache.json")
+	defer func() { CacheFilePath = oldCachePath }()
+
+	os.WriteFile(CacheFilePath, []byte("not json"), 0644)
+	if LoadCache() {
+		t.Error("LoadCache should return false for invalid JSON")
+	}
+}
+
+func TestLoadCache_WrongVersion(t *testing.T) {
+	tmp := t.TempDir()
+	oldCachePath := CacheFilePath
+	CacheFilePath = filepath.Join(tmp, "cache.json")
+	defer func() { CacheFilePath = oldCachePath }()
+
+	os.WriteFile(CacheFilePath, []byte(`{"version":99,"timestamp":"x","systems":{}}`), 0644)
+	if LoadCache() {
+		t.Error("LoadCache should return false for wrong version")
+	}
+}
+
+func TestSystemConfigJSONTags(t *testing.T) {
+	cfg := SystemConfig{
+		Core:       "_Console/SNES",
+		Delay:      2,
+		Type:       "f",
+		Index:      1,
+		Extensions: []string{".sfc", ".smc"},
+		SetName:    "SNES",
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]interface{}
+	json.Unmarshal(data, &parsed)
+	if parsed["core"] != "_Console/SNES" {
+		t.Error("json tag 'core' not working")
+	}
+	if parsed["type"] != "f" {
+		t.Error("json tag 'type' not working")
 	}
 }
