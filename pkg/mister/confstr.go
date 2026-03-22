@@ -728,8 +728,30 @@ func LookupCoreOSD(db *ConfStrDB, coreName string) *CoreOSD {
 			return &db.Cores[i]
 		}
 	}
-	// Fuzzy matching via longest common subsequence ratio
+	// Subsequence matching (TaitoSJ is subsequence of TaitoSystemSJ)
 	normTarget := normalizeForMatch(coreName)
+	for i := range db.Cores {
+		candidates := []string{db.Cores[i].CoreName, db.Cores[i].RbfName}
+		repo := db.Cores[i].Repo
+		if idx := strings.LastIndex(repo, "/"); idx >= 0 {
+			candidates = append(candidates, RepoToCoreName(repo[idx+1:]))
+		}
+		for _, c := range candidates {
+			nc := normalizeForMatch(c)
+			if nc == "" || nc == normTarget {
+				continue
+			}
+			// Check if shorter is subsequence of longer, and length ratio > 0.5
+			short, long := normTarget, nc
+			if len(short) > len(long) {
+				short, long = long, short
+			}
+			if float64(len(short))/float64(len(long)) > 0.4 && isSubsequence(short, long) {
+				return &db.Cores[i]
+			}
+		}
+	}
+	// Fuzzy matching via longest common subsequence ratio
 	if len(normTarget) < 4 {
 		return nil
 	}
@@ -774,6 +796,18 @@ func normalizeForMatch(s string) string {
 // lcsRatio returns the longest common subsequence length divided by
 // the length of the shorter string. This measures what fraction of the
 // shorter string appears as a subsequence of the longer one.
+
+// isSubsequence checks if short is a subsequence of long (all chars appear in order).
+func isSubsequence(short, long string) bool {
+	si := 0
+	for li := 0; li < len(long) && si < len(short); li++ {
+		if short[si] == long[li] {
+			si++
+		}
+	}
+	return si == len(short)
+}
+
 func lcsRatio(a, b string) float64 {
 	m, n := len(a), len(b)
 	if m == 0 || n == 0 {
