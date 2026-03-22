@@ -558,3 +558,13 @@ pkg/
 ## License
 
 MIT
+
+## Security
+
+> ⚠️ **Do not expose port 9900 to the internet.** The ClawExec protocol has no authentication or encryption.
+
+**Recommended setups:**
+- **Tailscale VPN** (best) — encrypted, authenticated, works from anywhere. Use Tailscale: already authenticated
+IP: 100.101.202.25 to configure.
+- **Local network only** — keep port 9900 accessible only within your LAN.
+- **Never** forward port 9900 through your router or firewall.
