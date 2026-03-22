@@ -85,6 +85,8 @@ func main() {
 		err = cmdCFGWrite(cmdArgs)
 	case "reload":
 		err = cmdReload()
+	case "rescan":
+		err = cmdRescan(cmdArgs)
 	case "discover":
 		err = cmdDiscover()
 	case "help":
@@ -850,6 +852,30 @@ func cmdReload() error {
 	return nil
 }
 
+func cmdRescan(args []string) error {
+	location, _ := extractFlag(args, "location", "l")
+
+	req := map[string]interface{}{"mister": "rescan"}
+	if location != "" {
+		req["location"] = location
+	}
+
+	resp, err := sendRequest(req)
+	if err != nil {
+		return err
+	}
+
+	if jsonFlag {
+		outputJSON(resp)
+		return nil
+	}
+
+	systemsFound, _ := resp["systems_found"].(float64)
+	loc, _ := resp["location"].(string)
+	fmt.Printf("Rescan complete: %d systems found (location: %s)\n", int(systemsFound), loc)
+	return nil
+}
+
 func printHelp() {
 	fmt.Print(`MisterClaw — Remote control for MiSTer-FPGA retro gaming platform.
 
@@ -872,6 +898,7 @@ COMMANDS:
   cfg-read      Read current CFG file and decode option values
   cfg-write     Set a core option by name (with automatic backup)
   reload        Reload current core (apply config changes)
+  rescan        Rescan ROM library (optionally for specific location)
   tailscale     Tailscale VPN management (setup/status/start/stop)
   shell         Execute shell command on MiSTer-FPGA
   discover      Scan local network for MiSTer-FPGA servers
@@ -1062,6 +1089,13 @@ func BuildRequest(cmd string, args []string) (map[string]interface{}, error) {
 		}, nil
 	case "reload":
 		return map[string]interface{}{"mister": "reload"}, nil
+	case "rescan":
+		location, _ := extractFlag(args, "location", "l")
+		req := map[string]interface{}{"mister": "rescan"}
+		if location != "" {
+			req["location"] = location
+		}
+		return req, nil
 	case "tailscale":
 		if len(args) == 0 {
 			return nil, fmt.Errorf("tailscale requires an action")

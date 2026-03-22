@@ -17,6 +17,7 @@ type DiscoveredSystem struct {
 	Config    SystemConfig   `json:"-"`
 	TotalROMs int            `json:"total_roms"`
 	HasCore   bool           `json:"has_core"`
+	NeedsScan bool           `json:"-"` // true if Phase 2 full scan is still needed
 }
 
 // SystemFolder represents a single ROM folder location.
@@ -48,15 +49,19 @@ var cdExtensions = map[string]bool{
 	".chd": true, ".cue": true, ".iso": true,
 }
 
-// Discovery cache with background scanning.
+// Discovery cache with two-phase background scanning.
+// Phase 1 (fast): scan folder names, use systemDefaults extensions, top-level file counts.
+// Phase 2 (full): scanFolderExtensions for unknown systems, accurate ROM counts.
 var (
 	cachedSystems map[string]*DiscoveredSystem
-	cacheReady    bool
+	cacheReady    bool // true after Phase 1 (commands work)
+	cacheComplete bool // true after Phase 2 (accurate counts)
 	cacheScanning bool
 	cacheMu       sync.RWMutex
 )
 
-// StartDiscovery begins background system discovery. Call once at server startup.
+// StartDiscovery begins two-phase system discovery. Call once at server startup.
+// Phase 1 runs synchronously (fast), Phase 2 runs in background.
 func StartDiscovery() {
 	cacheMu.Lock()
 	if cacheScanning {
@@ -65,27 +70,42 @@ func StartDiscovery() {
 	}
 	cacheScanning = true
 	cacheReady = false
+	cacheComplete = false
 	cacheMu.Unlock()
 
+	// Phase 1: fast discovery (folder names + systemDefaults)
+	systems := discoverSystemsFast()
+	cacheMu.Lock()
+	cachedSystems = systems
+	cacheReady = true
+	cacheMu.Unlock()
+
+	// Phase 2: full discovery in background
 	go func() {
-		systems := discoverSystems()
+		discoverSystemsFull(systems)
 		cacheMu.Lock()
-		cachedSystems = systems
-		cacheReady = true
+		cacheComplete = true
 		cacheScanning = false
 		cacheMu.Unlock()
 	}()
 }
 
-// IsDiscoveryReady returns true if background discovery has completed.
+// IsDiscoveryReady returns true after Phase 1 (fast scan). Commands can work.
 func IsDiscoveryReady() bool {
 	cacheMu.RLock()
 	defer cacheMu.RUnlock()
 	return cacheReady
 }
 
+// IsDiscoveryComplete returns true after Phase 2 (full scan with accurate counts).
+func IsDiscoveryComplete() bool {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	return cacheComplete
+}
+
 // getDiscoveredSystems returns the cached discovery results.
-// Returns nil if discovery hasn't completed yet.
+// Returns nil if discovery hasn't completed Phase 1 yet.
 func getDiscoveredSystems() map[string]*DiscoveredSystem {
 	cacheMu.RLock()
 	defer cacheMu.RUnlock()
@@ -96,10 +116,139 @@ func getDiscoveredSystems() map[string]*DiscoveredSystem {
 func InvalidateCache() {
 	cacheMu.Lock()
 	cacheReady = false
+	cacheComplete = false
 	cachedSystems = nil
 	cacheScanning = false
 	cacheMu.Unlock()
 	StartDiscovery()
+}
+
+// RescanLocation rescans a single location (e.g. "sd", "usb0") and merges
+// results into the existing cache. Returns the number of systems found at
+// that location.
+func RescanLocation(location string) int {
+	parent := locationToPath(location)
+	if parent == "" {
+		return 0
+	}
+
+	cacheMu.RLock()
+	existing := cachedSystems
+	cacheMu.RUnlock()
+	if existing == nil {
+		// No cache yet — do a full discovery instead
+		InvalidateCache()
+		cacheMu.RLock()
+		defer cacheMu.RUnlock()
+		count := 0
+		for _, ds := range cachedSystems {
+			for _, f := range ds.Folders {
+				if f.Location == location {
+					count++
+					break
+				}
+			}
+		}
+		return count
+	}
+
+	// Remove old folders for this location from cache
+	cacheMu.Lock()
+	for key, ds := range cachedSystems {
+		var kept []SystemFolder
+		for _, f := range ds.Folders {
+			if f.Location != location {
+				kept = append(kept, f)
+			}
+		}
+		if len(kept) == 0 {
+			delete(cachedSystems, key)
+		} else {
+			ds.Folders = kept
+			ds.TotalROMs = 0
+			for _, f := range kept {
+				ds.TotalROMs += f.RomCount
+			}
+		}
+	}
+	cacheMu.Unlock()
+
+	// Scan the location
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return 0
+	}
+
+	cores := scanCores()
+	mglMappings := parseMGLFiles()
+	systemsFound := 0
+
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dirPath := filepath.Join(parent, e.Name())
+		key := strings.ToLower(e.Name())
+
+		count := countTopLevelFiles(dirPath)
+		if count == 0 {
+			continue
+		}
+
+		ds, exists := cachedSystems[key]
+		if !exists {
+			ds = &DiscoveredSystem{Name: e.Name()}
+			if cfg, ok := getDefaultConfig(e.Name()); ok {
+				ds.Config = cfg
+				ds.HasCore = true
+			} else {
+				ds.NeedsScan = true
+				// Try core/MGL matching
+				if corePath, ok := cores[key]; ok {
+					ds.Config.Core = corePath
+					ds.HasCore = true
+					ds.NeedsScan = false
+				} else if corePath, ok := mglMappings[e.Name()]; ok {
+					ds.Config.Core = corePath
+					ds.Config.SetName = e.Name()
+					ds.HasCore = true
+					ds.NeedsScan = false
+				}
+			}
+			cachedSystems[key] = ds
+		}
+
+		ds.Folders = append(ds.Folders, SystemFolder{
+			Path:     dirPath,
+			Location: location,
+			RomCount: count,
+		})
+		ds.TotalROMs += count
+		systemsFound++
+	}
+
+	return systemsFound
+}
+
+// locationToPath converts a location name to its filesystem path.
+func locationToPath(location string) string {
+	if location == "sd" {
+		return sdGamesPath
+	}
+	if strings.HasPrefix(location, "usb") {
+		numStr := strings.TrimPrefix(location, "usb")
+		if n, err := fmt.Sscanf(numStr, "%d", new(int)); err == nil && n == 1 {
+			var idx int
+			fmt.Sscanf(numStr, "%d", &idx)
+			if idx >= 0 && idx <= 7 {
+				return fmt.Sprintf(usbPathFormat, idx)
+			}
+		}
+	}
+	return ""
 }
 
 // extractCoreName strips the date suffix and .rbf extension from a core filename.
@@ -215,11 +364,33 @@ func getDefaultConfig(system string) (SystemConfig, bool) {
 	return SystemConfig{}, false
 }
 
-// discoverSystems performs full system discovery by scanning ROM folders, cores, and MGL files.
-func discoverSystems() map[string]*DiscoveredSystem {
+// countTopLevelFiles counts non-directory, non-meta entries in a directory (non-recursive).
+func countTopLevelFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			// Count subdirectories as potential ROM containers (e.g. PSX game folders)
+			count++
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if ext != "" && !metaExtensions[ext] {
+			count++
+		}
+	}
+	return count
+}
+
+// discoverSystemsFast performs Phase 1 discovery: scan folder names, use systemDefaults
+// extensions for known systems, count top-level entries only (approximate counts).
+// This is fast (<2s even with many USB drives) because it never recurses into ROM folders.
+func discoverSystemsFast() map[string]*DiscoveredSystem {
 	systems := make(map[string]*DiscoveredSystem)
 
-	// 1. Scan ROM folders
 	scanLocation := func(parent, location string) {
 		entries, err := os.ReadDir(parent)
 		if err != nil {
@@ -230,15 +401,36 @@ func discoverSystems() map[string]*DiscoveredSystem {
 				continue
 			}
 			dirPath := filepath.Join(parent, e.Name())
-			exts, count := scanFolderExtensions(dirPath)
-			if count == 0 {
+			key := strings.ToLower(e.Name())
+
+			// For known systems, use systemDefaults extensions; count top-level only
+			if cfg, ok := getDefaultConfig(e.Name()); ok {
+				count := countTopLevelFiles(dirPath)
+				if count == 0 {
+					continue
+				}
+				ds, exists := systems[key]
+				if !exists {
+					ds = &DiscoveredSystem{Name: e.Name(), Config: cfg, HasCore: true}
+					systems[key] = ds
+				}
+				ds.Folders = append(ds.Folders, SystemFolder{
+					Path:     dirPath,
+					Location: location,
+					RomCount: count,
+				})
+				ds.TotalROMs += count
 				continue
 			}
 
-			key := strings.ToLower(e.Name())
+			// Unknown system: just check it has any non-meta files at top level
+			count := countTopLevelFiles(dirPath)
+			if count == 0 {
+				continue
+			}
 			ds, exists := systems[key]
 			if !exists {
-				ds = &DiscoveredSystem{Name: e.Name()}
+				ds = &DiscoveredSystem{Name: e.Name(), NeedsScan: true}
 				systems[key] = ds
 			}
 			ds.Folders = append(ds.Folders, SystemFolder{
@@ -247,17 +439,6 @@ func discoverSystems() map[string]*DiscoveredSystem {
 				RomCount: count,
 			})
 			ds.TotalROMs += count
-
-			// Merge extensions from this folder
-			extSet := make(map[string]bool)
-			for _, ext := range ds.Config.Extensions {
-				extSet[ext] = true
-			}
-			for _, ext := range exts {
-				if !extSet[ext] {
-					ds.Config.Extensions = append(ds.Config.Extensions, ext)
-				}
-			}
 		}
 	}
 
@@ -266,22 +447,16 @@ func discoverSystems() map[string]*DiscoveredSystem {
 		scanLocation(fmt.Sprintf(usbPathFormat, i), fmt.Sprintf("usb%d", i))
 	}
 
-	// 2. Scan cores and MGL files
+	// Match unknown systems to cores and MGL files
 	cores := scanCores()
 	mglMappings := parseMGLFiles()
 
-	// 3. Match folders to cores and set MGL parameters
 	for key, ds := range systems {
-		// Check systemDefaults first (most reliable source of MGL params)
-		if cfg, ok := getDefaultConfig(ds.Name); ok {
-			diskExts := ds.Config.Extensions
-			ds.Config = cfg
-			ds.Config.Extensions = diskExts
-			ds.HasCore = true
-			continue
+		if ds.HasCore {
+			continue // Already matched via systemDefaults
 		}
 
-		// Try direct core name match (case-insensitive)
+		// Try direct core name match
 		if corePath, ok := cores[key]; ok {
 			ds.Config.Core = corePath
 			ds.HasCore = true
@@ -295,27 +470,118 @@ func discoverSystems() map[string]*DiscoveredSystem {
 				ds.HasCore = true
 			}
 		}
-
-		// Set default MGL params for systems not in systemDefaults
-		if ds.Config.Type == "" {
-			isCDBased := false
-			for _, ext := range ds.Config.Extensions {
-				if cdExtensions[ext] {
-					isCDBased = true
-					break
-				}
-			}
-			if isCDBased {
-				ds.Config.Type = "s"
-				ds.Config.Index = 0
-				ds.Config.Delay = 1
-			} else {
-				ds.Config.Type = "f"
-				ds.Config.Index = 1
-				ds.Config.Delay = 2
-			}
-		}
 	}
 
+	return systems
+}
+
+// discoverSystemsFull performs Phase 2 discovery: full recursive scan for unknown systems,
+// accurate ROM counts for all systems. Mutates the systems map in place (under lock).
+func discoverSystemsFull(systems map[string]*DiscoveredSystem) {
+	type folderResult struct {
+		key      string
+		folder   int
+		romCount int
+	}
+	type systemResult struct {
+		key       string
+		totalROMs int
+		exts      []string
+		mglType   string
+		mglIndex  int
+		mglDelay  int
+	}
+
+	// Snapshot what needs scanning (read under lock)
+	type scanWork struct {
+		key     string
+		folders []SystemFolder
+	}
+	var work []scanWork
+	cacheMu.RLock()
+	for key, ds := range systems {
+		if !ds.NeedsScan {
+			continue
+		}
+		// Copy folder list so we don't hold the lock during I/O
+		folders := make([]SystemFolder, len(ds.Folders))
+		copy(folders, ds.Folders)
+		work = append(work, scanWork{key: key, folders: folders})
+	}
+	cacheMu.RUnlock()
+
+	// Do all I/O without any lock held
+	var folderResults []folderResult
+	var systemResults []systemResult
+
+	for _, w := range work {
+		allExts := make(map[string]bool)
+		totalCount := 0
+
+		for i, folder := range w.folders {
+			exts, count := scanFolderExtensions(folder.Path)
+			totalCount += count
+			for _, ext := range exts {
+				allExts[ext] = true
+			}
+			folderResults = append(folderResults, folderResult{
+				key:      w.key,
+				folder:   i,
+				romCount: count,
+			})
+		}
+
+		isCDBased := false
+		var extSlice []string
+		for ext := range allExts {
+			extSlice = append(extSlice, ext)
+			if cdExtensions[ext] {
+				isCDBased = true
+			}
+		}
+
+		sr := systemResult{
+			key:       w.key,
+			totalROMs: totalCount,
+			exts:      extSlice,
+		}
+		if isCDBased {
+			sr.mglType = "s"
+			sr.mglIndex = 0
+			sr.mglDelay = 1
+		} else {
+			sr.mglType = "f"
+			sr.mglIndex = 1
+			sr.mglDelay = 2
+		}
+		systemResults = append(systemResults, sr)
+	}
+
+	// Apply results under write lock
+	cacheMu.Lock()
+	for _, fr := range folderResults {
+		if ds, ok := systems[fr.key]; ok && fr.folder < len(ds.Folders) {
+			ds.Folders[fr.folder].RomCount = fr.romCount
+		}
+	}
+	for _, sr := range systemResults {
+		if ds, ok := systems[sr.key]; ok {
+			ds.TotalROMs = sr.totalROMs
+			ds.Config.Extensions = sr.exts
+			if ds.Config.Type == "" {
+				ds.Config.Type = sr.mglType
+				ds.Config.Index = sr.mglIndex
+				ds.Config.Delay = sr.mglDelay
+			}
+			ds.NeedsScan = false
+		}
+	}
+	cacheMu.Unlock()
+}
+
+// discoverSystems performs full system discovery (used by tests that call it directly).
+func discoverSystems() map[string]*DiscoveredSystem {
+	systems := discoverSystemsFast()
+	discoverSystemsFull(systems)
 	return systems
 }

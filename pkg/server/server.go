@@ -54,8 +54,9 @@ type Request struct {
 	DPad     string   `json:"dpad,omitempty"`
 
 	// CFG commands
-	Option string `json:"option,omitempty"`
-	Value  string `json:"value,omitempty"`
+	Option   string `json:"option,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Location string `json:"location,omitempty"`
 }
 
 // ResizeRequest holds PTY dimensions.
@@ -352,8 +353,9 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 		}
 		stats := mister.GetSystemStats()
 		send(map[string]interface{}{
-			"mister":  "systems",
-			"systems": stats,
+			"mister":   "systems",
+			"systems":  stats,
+			"complete": mister.IsDiscoveryComplete(),
 		})
 
 	case "search":
@@ -645,6 +647,9 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 	case "reload":
 		s.handleReload(req, send)
 
+	case "rescan":
+		s.handleRescan(req, send)
+
 	default:
 		send(map[string]interface{}{
 			"error": fmt.Sprintf("unknown mister command: %s", req.MiSTer),
@@ -692,6 +697,37 @@ func (s *Server) handleReload(req Request, send func(interface{})) {
 	mister.LoadCore(path)
 	send(map[string]interface{}{"mister": "reload", "success": true, "path": path})
 }
+
+func (s *Server) handleRescan(req Request, send func(interface{})) {
+	location := req.Location
+	if location == "" {
+		mister.InvalidateCache()
+		// Wait for Phase 1 to complete
+		for i := 0; i < 100; i++ {
+			if mister.IsDiscoveryReady() {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		stats := mister.GetSystemStats()
+		send(map[string]interface{}{
+			"mister":        "rescan",
+			"success":       true,
+			"systems_found": len(stats),
+			"location":      "all",
+		})
+		return
+	}
+
+	systemsFound := mister.RescanLocation(location)
+	send(map[string]interface{}{
+		"mister":        "rescan",
+		"success":       true,
+		"systems_found": systemsFound,
+		"location":      location,
+	})
+}
+
 type coreContext struct {
 	OSD     *mister.CoreOSD
 	CFGData []byte

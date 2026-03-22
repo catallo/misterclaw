@@ -301,6 +301,16 @@ func toolsList() []ToolDef {
 				"properties": map[string]interface{}{},
 			},
 		},
+		{
+			Name:        "mister_rescan",
+			Description: "Rescan ROM library to detect new games. Optionally specify location (sd, usb0, usb1, ...) to scan only one drive.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"location": map[string]interface{}{"type": "string", "description": "Storage location to rescan (e.g. 'sd', 'usb0', 'usb1'). If omitted, rescans all locations."},
+				},
+			},
+		},
 	}
 }
 
@@ -435,6 +445,13 @@ func callTool(params json.RawMessage) MCPToolResult {
 
 	case "mister_reload":
 		return doMisterCommand(map[string]interface{}{"mister": "reload"}, formatReload)
+
+	case "mister_rescan":
+		req := map[string]interface{}{"mister": "rescan"}
+		if v, ok := args["location"].(string); ok && v != "" {
+			req["location"] = v
+		}
+		return doMisterCommand(req, formatRescan)
 
 	default:
 		return errorResult(fmt.Sprintf("unknown tool: %s", p.Name))
@@ -869,6 +886,17 @@ func formatReload(resp map[string]interface{}) MCPToolResult {
 
 	path, _ := resp["path"].(string)
 	return textResult(fmt.Sprintf("Reloaded: %s", path))
+}
+
+func formatRescan(resp map[string]interface{}) MCPToolResult {
+	if success, ok := resp["success"].(bool); ok && !success {
+		errMsg, _ := resp["error"].(string)
+		return errorResult(errMsg)
+	}
+
+	systemsFound, _ := resp["systems_found"].(float64)
+	location, _ := resp["location"].(string)
+	return textResult(fmt.Sprintf("Rescan complete: %d systems found (location: %s)", int(systemsFound), location))
 }
 
 // Result helpers
