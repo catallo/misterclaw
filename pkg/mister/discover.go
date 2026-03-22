@@ -152,21 +152,44 @@ func parseMGLFiles() map[string]string {
 }
 
 // scanFolderExtensions scans a directory for file extensions, excluding meta files.
+// Only scans top-level files + one level of subdirectories for performance on ARM.
 // Returns extensions sorted by frequency (most common first) and total file count.
 func scanFolderExtensions(dir string) (extensions []string, count int) {
 	extCounts := make(map[string]int)
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
+
+	// Scan top-level entries
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, 0
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			// Scan one level deep (ROM subfolders like "Sonic The Hedgehog 2/")
+			subEntries, err := os.ReadDir(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			for _, se := range subEntries {
+				if se.IsDir() {
+					continue
+				}
+				ext := strings.ToLower(filepath.Ext(se.Name()))
+				if ext == "" || metaExtensions[ext] {
+					continue
+				}
+				extCounts[ext]++
+				count++
+			}
+			continue
 		}
-		ext := strings.ToLower(filepath.Ext(path))
+		ext := strings.ToLower(filepath.Ext(e.Name()))
 		if ext == "" || metaExtensions[ext] {
-			return nil
+			continue
 		}
 		extCounts[ext]++
 		count++
-		return nil
-	})
+	}
+
 	for ext := range extCounts {
 		extensions = append(extensions, ext)
 	}
