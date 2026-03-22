@@ -135,12 +135,14 @@ clawexec-mister-fpga-send launch "castlevania" --system NES --json
 clawexec-mister-fpga-send systems
 ```
 ```
-SNES              892 ROMs (sd)
-MegaDrive         634 ROMs (sd)
-NES               512 ROMs (sd)
-Gameboy           340 ROMs (usb0)
-GBA               256 ROMs (usb0)
-PSX                42 ROMs (usb1)
+SNES             13435 ROMs (sd)
+C64              46736 ROMs (sd)
+Amiga            55793 ROMs (usb0)
+MegaDrive         8341 ROMs (sd)
+NES               7204 ROMs (sd)
+Gameboy           4512 ROMs (usb0)
+GBA               3891 ROMs (usb0)
+PSX                342 ROMs (usb1)
 ```
 
 ```bash
@@ -150,9 +152,11 @@ clawexec-mister-fpga-send systems --json
 {
   "mister": "systems",
   "systems": [
-    {"system": "SNES", "rom_count": 892, "location": "sd"},
-    {"system": "MegaDrive", "rom_count": 634, "location": "sd"},
-    {"system": "NES", "rom_count": 512, "location": "sd"}
+    {"system": "SNES", "rom_count": 13435, "location": "sd"},
+    {"system": "C64", "rom_count": 46736, "location": "sd"},
+    {"system": "Amiga", "rom_count": 55793, "location": "usb0"},
+    {"system": "MegaDrive", "rom_count": 8341, "location": "sd"},
+    {"system": "NES", "rom_count": 7204, "location": "sd"}
   ]
 }
 ```
@@ -203,7 +207,7 @@ RAM:      416/492 MB free
 Disk:     /media/fat — 8755/244005 MB free (97% used) [/dev/root]
 Disk:     /media/usb0 — 11452/57449 MB free (79% used) [/dev/sda1]
 Disk:     /media/usb1 — 489/117355 MB free (100% used) [/dev/sdb1]
-Uptime:   28m
+Uptime:   3d 14h
 ```
 
 ```bash
@@ -370,11 +374,15 @@ clawexec-mister-fpga-send info --json
 
 ### System Names
 
-Systems are auto-detected from your ROM library. Any system with ROMs in `/media/fat/games/` or USB drives (`/media/usb0/` through `/media/usb7/`) is automatically available. System names match the folder names on disk (case-insensitive).
+Systems are auto-detected from your ROM library — there is no hardcoded list. Any folder containing ROMs under `/media/fat/games/` or USB drives (`/media/usb0/` through `/media/usb7/`) is automatically discovered as a system. A well-stocked MiSTer typically has 70+ systems. System names match the folder names on disk (case-insensitive).
 
 Core matching is automatic: ROM folder names are matched to installed `.rbf` cores and `.mgl` mappings. Well-known systems (SNES, NES, Genesis, PSX, etc.) have curated MGL launch parameters built in as defaults. Unknown systems get sensible defaults — CD-based systems (with `.chd`/`.cue`/`.iso` files) are detected automatically.
 
 Use `clawexec-mister-fpga-send systems` to see all detected systems and ROM counts.
+
+### Background Discovery
+
+System discovery runs in the background at server startup, recursively scanning all ROM folders across SD and USB drives. On a typical setup this takes ~90 seconds. During the scan, `systems` and `search` commands return `"status": "pending"` until discovery completes. Once finished, results are cached in memory for instant access.
 
 ### Error Handling
 
@@ -404,6 +412,7 @@ Error: connecting to mister-fpga:9900: dial tcp: lookup mister-fpga: no such hos
 - **All commands support `--json`** for structured, machine-parseable output
 - **`--path` requires `--system`**: When launching by direct path, you must also specify the system
 - **Cross-system search**: Omit `--system` to search all systems at once
+- **Self-install**: The server binary can install itself with `--install` — copies to `/media/fat/Scripts/`, configures autostart on boot, and is idempotent (safe to run multiple times)
 
 ---
 
@@ -443,14 +452,20 @@ Once installed, you just talk to your AI agent:
 You: "Start Sonic 2 on the MiSTer"
 Agent: Launched Sonic The Hedgehog 2 on MegaDrive! 🦔
 
-You: "What's playing?"
-Agent: SNES core running Super Mario World.
+You: "What systems do I have?"
+Agent: Your MiSTer has 70+ systems! Top ones:
+  - SNES: 13,435 ROMs
+  - C64: 46,736 ROMs
+  - Amiga: 55,793 ROMs
+  ...
 
 You: "Take a screenshot"
-Agent: [shows screenshot]
+Agent: [shows screenshot from MiSTer]
 
-You: "Set up Tailscale"
-Agent: Done! MiSTer reachable at 100.101.202.25. Auth link: https://...
+You: "Set up Tailscale so I can play from anywhere"
+Agent: Installing Tailscale... Done!
+       Please authenticate: https://login.tailscale.com/a/xxx
+       After that your MiSTer is reachable from anywhere.
 ```
 
 Your agent reads the documentation above, picks the right commands, and handles everything. You just say what you want.
