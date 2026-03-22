@@ -18,7 +18,7 @@ type DiscoveredServer struct {
 	Core string `json:"core,omitempty"`
 }
 
-// discoverServers scans all local /24 subnets for ClawExec MiSTer-FPGA servers.
+// discoverServers scans all local /24 subnets for MisterClaw servers.
 func discoverServers(port int, timeout time.Duration) []DiscoveredServer {
 	subnets := localSubnets()
 	if len(subnets) == 0 {
@@ -66,7 +66,7 @@ done:
 	return results
 }
 
-// probeServer checks if a host:port has a ClawExec MiSTer-FPGA server.
+// probeServer checks if a host:port has a MisterClaw server.
 func probeServer(host string, port int, timeout time.Duration) (DiscoveredServer, bool) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, timeout)
@@ -171,7 +171,7 @@ func resolveHost(host string, port int) string {
 	servers := discoverServers(port, 500*time.Millisecond)
 
 	if len(servers) == 1 {
-		fmt.Fprintf(os.Stderr, "Auto-discovered MiSTer-FPGA at %s\n", servers[0].Host)
+		fmt.Fprintf(os.Stderr, "Auto-discovered MisterClaw at %s\n", servers[0].Host)
 		return servers[0].Host
 	}
 
@@ -199,15 +199,15 @@ func cmdDiscover() error {
 	}
 
 	if len(servers) == 0 {
-		fmt.Println("No MiSTer-FPGA servers found on local network.")
+		fmt.Println("No MisterClaw servers found on local network.")
 		fmt.Println("\nTips:")
-		fmt.Println("  - Make sure the MiSTer-FPGA server is running")
+		fmt.Println("  - Make sure the MisterClaw server is running")
 		fmt.Println("  - Check that you're on the same network")
 		fmt.Println("  - Try specifying the host directly: --host <IP>")
 		return nil
 	}
 
-	fmt.Printf("Found %d MiSTer-FPGA server(s):\n", len(servers))
+	fmt.Printf("Found %d MisterClaw server(s):\n", len(servers))
 	for _, s := range servers {
 		line := fmt.Sprintf("  %s:%d", s.Host, s.Port)
 		if s.Core != "" {

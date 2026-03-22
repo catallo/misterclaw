@@ -69,7 +69,7 @@ func TestHandleInitialize(t *testing.T) {
 	if !ok {
 		t.Fatal("expected serverInfo map")
 	}
-	if serverInfo["name"] != "mister-fpga-mcp" {
+	if serverInfo["name"] != "misterclaw-mcp" {
 		t.Errorf("unexpected server name: %v", serverInfo["name"])
 	}
 }

@@ -1,18 +1,18 @@
-# ClawExec for MiSTer-FPGA
+# MisterClaw
 
-Headless ClawExec server and CLI client for MiSTer FPGA (DE10-Nano, ARMv7).
+MisterClaw server and CLI client for MiSTer FPGA (DE10-Nano, ARMv7).
 Same TCP/JSON protocol as the Flutter GUI — existing `clawexec-send` client works unchanged.
 
 ## Repository
-- **GitHub:** github.com/catallo/clawexec-mister (public, open-source)
+- **GitHub:** github.com/catallo/misterclaw (public, open-source)
 - **License:** MIT
 
 ## Binaries
 
 | Binary | Purpose | Target |
 |--------|---------|--------|
-| `clawexec-mister-fpga` | Server — runs on MiSTer-FPGA | `GOOS=linux GOARCH=arm GOARM=7` |
-| `clawexec-mister-fpga-send` | Client CLI — runs anywhere | `GOOS=linux GOARCH=amd64`, `darwin/arm64`, etc. |
+| `misterclaw` | Server — runs on MiSTer-FPGA | `GOOS=linux GOARCH=arm GOARM=7` |
+| `misterclaw-send` | Client CLI — runs anywhere | `GOOS=linux GOARCH=amd64`, `darwin/arm64`, etc. |
 
 - **Server** runs on MiSTer-FPGA (ARM7, Buildroot Linux, 492 MB RAM), listens on TCP port 9900
 - **Client** runs on any platform (Linux, macOS), connects to server via TCP
@@ -22,8 +22,8 @@ Same TCP/JSON protocol as the Flutter GUI — existing `clawexec-send` client wo
 ### Package Structure
 
 ```
-cmd/clawexec-mister-fpga/main.go       — Server entry point, flags, signal handling
-cmd/clawexec-mister-fpga-send/main.go  — Client CLI, subcommands, flag parsing
+cmd/misterclaw/main.go       — Server entry point, flags, signal handling
+cmd/misterclaw-send/main.go  — Client CLI, subcommands, flag parsing
 pkg/
   server/server.go                      — TCP server, JSON protocol (port 9900)
   session/manager.go                    — Session management, per-session locks, sequential execution
@@ -39,7 +39,7 @@ pkg/
 
 ## Implemented Features
 
-### Client Commands (`clawexec-mister-fpga-send`)
+### Client Commands (`misterclaw-send`)
 - `launch` — Launch a game by fuzzy search or direct ROM path
 - `search` — Search ROM library across all systems
 - `systems` — List available systems and ROM counts
@@ -49,7 +49,7 @@ pkg/
 - `tailscale setup|status|start|stop` — Tailscale VPN management
 - `shell` — Execute arbitrary shell command on MiSTer-FPGA
 
-### Server Features (`clawexec-mister-fpga`)
+### Server Features (`misterclaw`)
 - TCP server with newline-delimited JSON protocol on port 9900
 - Session management (parallel sessions, sequential per-session execution)
 - PTY execution with pipe fallback
@@ -125,19 +125,19 @@ Newline-delimited JSON over TCP (port 9900). **100% compatible with ClawExec GUI
 
 ```bash
 # Build server (for MiSTer-FPGA, ARM7)
-GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o clawexec-mister-fpga ./cmd/clawexec-mister-fpga/
+GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o misterclaw ./cmd/misterclaw/
 
 # Build client (for local machine, e.g. Linux amd64)
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o clawexec-mister-fpga-send ./cmd/clawexec-mister-fpga-send/
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o misterclaw-send ./cmd/misterclaw-send/
 
 # Deploy server to MiSTer
-scp clawexec-mister-fpga root@10.0.0.8:/media/fat/Scripts/
+scp misterclaw root@10.0.0.8:/media/fat/Scripts/
 
 # Run server on MiSTer
-/media/fat/Scripts/clawexec-mister-fpga --port 9900
+/media/fat/Scripts/misterclaw --port 9900
 
 # Autostart: add to /media/fat/linux/user-startup.sh
-# /media/fat/Scripts/clawexec-mister-fpga --port 9900 --daemon &
+# /media/fat/Scripts/misterclaw --port 9900 --daemon &
 ```
 
 ## Cross-compilation Targets

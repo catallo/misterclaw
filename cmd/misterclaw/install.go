@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	targetBinaryPath = "/media/fat/Scripts/clawexec-mister-fpga"
+	targetBinaryPath = "/media/fat/Scripts/misterclaw"
 	startupFilePath  = "/media/fat/linux/user-startup.sh"
-	clawexecMarker   = "clawexec-mister-fpga"
+	clawexecMarker   = "misterclaw"
 )
 
 func installServer(port int) {
@@ -48,7 +48,7 @@ func installServer(port int) {
 	// 4. Add autostart entry (idempotent)
 	newContent, changed := addClawexecAutostart(string(content), port)
 	if !changed {
-		fmt.Println("ClawExec for MiSTer-FPGA is already installed.")
+		fmt.Println("MisterClaw is already installed.")
 		return
 	}
 
@@ -58,7 +58,7 @@ func installServer(port int) {
 	}
 
 	// 5. Print confirmation
-	fmt.Println("ClawExec for MiSTer-FPGA installed!")
+	fmt.Println("MisterClaw installed!")
 	fmt.Printf("  Binary: %s\n", targetBinaryPath)
 	fmt.Printf("  Autostart: %s (port %d)\n", startupFilePath, port)
 	if backupPath != "" {
@@ -83,7 +83,7 @@ func uninstallServer() {
 	// 2. Remove autostart entry
 	newContent, changed := removeClawexecAutostart(string(content))
 	if !changed {
-		fmt.Println("ClawExec for MiSTer-FPGA is not in autostart.")
+		fmt.Println("MisterClaw is not in autostart.")
 		return
 	}
 
@@ -100,31 +100,31 @@ func uninstallServer() {
 		os.Exit(1)
 	}
 
-	fmt.Println("ClawExec for MiSTer-FPGA removed from autostart.")
+	fmt.Println("MisterClaw removed from autostart.")
 	fmt.Printf("  Backup: %s\n", backupPath)
 	fmt.Printf("  Binary NOT removed: %s\n", targetBinaryPath)
 	fmt.Println("  Delete it manually if desired.")
 }
 
-// addClawexecAutostart adds the ClawExec autostart entry to startup script content.
+// addClawexecAutostart adds the MisterClaw autostart entry to startup script content.
 // Returns the modified content and whether it was changed.
 func addClawexecAutostart(content string, port int) (string, bool) {
 	if strings.Contains(content, clawexecMarker) {
 		return content, false
 	}
-	entry := fmt.Sprintf("\n# ClawExec for MiSTer-FPGA\n[[ -e %s ]] && %s --port %d &\n",
+	entry := fmt.Sprintf("\n# MisterClaw\n[[ -e %s ]] && %s --port %d &\n",
 		targetBinaryPath, targetBinaryPath, port)
 	return content + entry, true
 }
 
-// removeClawexecAutostart removes ClawExec autostart lines from startup script content.
+// removeClawexecAutostart removes MisterClaw autostart lines from startup script content.
 // Returns the modified content and whether it was changed.
 func removeClawexecAutostart(content string) (string, bool) {
 	lines := strings.Split(content, "\n")
 	var result []string
 	changed := false
 	for _, line := range lines {
-		if strings.Contains(line, clawexecMarker) || strings.Contains(line, "# ClawExec for MiSTer-FPGA") {
+		if strings.Contains(line, clawexecMarker) || strings.Contains(line, "# MisterClaw") {
 			changed = true
 			continue
 		}

@@ -14,13 +14,13 @@ func TestAddClawexecAutostart(t *testing.T) {
 	if !changed {
 		t.Fatal("expected change")
 	}
-	if !strings.Contains(result, "clawexec-mister-fpga") {
+	if !strings.Contains(result, "misterclaw") {
 		t.Fatal("expected clawexec entry in result")
 	}
 	if !strings.Contains(result, "--port 9900") {
 		t.Fatal("expected port in entry")
 	}
-	if !strings.Contains(result, "[[ -e /media/fat/Scripts/clawexec-mister-fpga ]]") {
+	if !strings.Contains(result, "[[ -e /media/fat/Scripts/misterclaw ]]") {
 		t.Fatal("expected existence check")
 	}
 }
@@ -55,13 +55,13 @@ func TestAddClawexecAutostartIdempotent(t *testing.T) {
 }
 
 func TestRemoveClawexecAutostart(t *testing.T) {
-	content := "#!/bin/bash\necho 'hello'\n\n# ClawExec for MiSTer-FPGA\n[[ -e /media/fat/Scripts/clawexec-mister-fpga ]] && /media/fat/Scripts/clawexec-mister-fpga --port 9900 &\n"
+	content := "#!/bin/bash\necho 'hello'\n\n# MisterClaw\n[[ -e /media/fat/Scripts/misterclaw ]] && /media/fat/Scripts/misterclaw --port 9900 &\n"
 
 	result, changed := removeClawexecAutostart(content)
 	if !changed {
 		t.Fatal("expected change")
 	}
-	if strings.Contains(result, "clawexec-mister-fpga") {
+	if strings.Contains(result, "misterclaw") {
 		t.Fatal("expected clawexec entry removed")
 	}
 	if !strings.Contains(result, "echo 'hello'") {
@@ -97,7 +97,7 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	}
 
 	// Should not contain clawexec
-	if strings.Contains(uninstalled, "clawexec-mister-fpga") {
+	if strings.Contains(uninstalled, "misterclaw") {
 		t.Fatal("clawexec should be removed")
 	}
 	// Original content should be preserved
@@ -132,7 +132,7 @@ func TestStartupFileModification(t *testing.T) {
 
 	// Verify
 	written, _ := os.ReadFile(startupPath)
-	if !strings.Contains(string(written), "clawexec-mister-fpga") {
+	if !strings.Contains(string(written), "misterclaw") {
 		t.Fatal("expected entry in file")
 	}
 

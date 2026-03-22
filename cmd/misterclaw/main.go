@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/catallo/clawexec-mister-fpga/pkg/mister"
-	"github.com/catallo/clawexec-mister-fpga/pkg/server"
-	"github.com/catallo/clawexec-mister-fpga/pkg/session"
+	"github.com/catallo/misterclaw/pkg/mister"
+	"github.com/catallo/misterclaw/pkg/server"
+	"github.com/catallo/misterclaw/pkg/session"
 )
 
 const Version = "0.1.0"
@@ -25,7 +25,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("clawexec-mister-fpga v%s\n", Version)
+		fmt.Printf("misterclaw v%s\n", Version)
 		os.Exit(0)
 	}
 
@@ -40,9 +40,9 @@ func main() {
 
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
-	log.SetPrefix("[clawexec-mister-fpga] ")
+	log.SetPrefix("[misterclaw] ")
 
-	log.Printf("starting clawexec-mister-fpga on %s:%d (shell: %s)", *host, *port, *shell)
+	log.Printf("starting misterclaw on %s:%d (shell: %s)", *host, *port, *shell)
 
 	// Start background system discovery (scans ROM folders, cores, extensions)
 	mister.StartDiscovery()

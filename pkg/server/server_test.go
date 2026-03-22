@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/catallo/clawexec-mister-fpga/pkg/session"
+	"github.com/catallo/misterclaw/pkg/session"
 )
 
 func startTestServer(t *testing.T) (string, *Server) {

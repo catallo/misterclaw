@@ -1,6 +1,6 @@
-# ClawExec for MiSTer-FPGA
+# 👾🦀 MisterClaw — AI-powered remote control for MiSTer-FPGA
 
-Remote control server and CLI client for MiSTer-FPGA.
+Remote control server and CLI client for MiSTer-FPGA. Built on the ClawExec protocol.
 
 ![Version](https://img.shields.io/badge/Version-v0.1.0-blue)
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
@@ -17,8 +17,8 @@ This section is the primary reference for LLMs and AI agents. It contains everyt
 
 | Property | Value |
 |----------|-------|
-| Server binary | `clawexec-mister-fpga` |
-| Client binary | `clawexec-mister-fpga-send` |
+| Server binary | `misterclaw` |
+| Client binary | `misterclaw-send` |
 | Protocol | Newline-delimited JSON over TCP |
 | Default port | `9900` |
 | Default host | `mister-fpga` (Tailscale hostname, auto-discovered on LAN) |
@@ -30,16 +30,16 @@ This section is the primary reference for LLMs and AI agents. It contains everyt
 
 **Server** (on MiSTer-FPGA):
 ```bash
-wget -q https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-arm7 -O /tmp/clawexec-mister-fpga && chmod +x /tmp/clawexec-mister-fpga && /tmp/clawexec-mister-fpga --install
+wget -q https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-arm7 -O /tmp/misterclaw && chmod +x /tmp/misterclaw && /tmp/misterclaw --install
 ```
 
 **Client** (on your machine):
 ```bash
 # Linux amd64:
-wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-send-linux-amd64 -O clawexec-mister-fpga-send && chmod +x clawexec-mister-fpga-send
+wget https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-send-linux-amd64 -O misterclaw-send && chmod +x misterclaw-send
 
 # macOS Apple Silicon:
-wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-send-darwin-arm64 -O clawexec-mister-fpga-send && chmod +x clawexec-mister-fpga-send
+wget https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-send-darwin-arm64 -O misterclaw-send && chmod +x misterclaw-send
 ```
 
 ### All Commands
@@ -47,7 +47,7 @@ wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/cl
 #### `status` — Current core and game
 
 ```bash
-clawexec-mister-fpga-send status
+misterclaw-send status
 ```
 ```
 Core: SNES
@@ -55,7 +55,7 @@ Game: /media/fat/games/SNES/Super Mario World (USA).sfc
 ```
 
 ```bash
-clawexec-mister-fpga-send status --json
+misterclaw-send status --json
 ```
 ```json
 {
@@ -69,7 +69,7 @@ clawexec-mister-fpga-send status --json
 #### `search` — Search ROM library
 
 ```bash
-clawexec-mister-fpga-send search "zelda" --system SNES --limit 5
+misterclaw-send search "zelda" --system SNES --limit 5
 ```
 ```
 1. Legend of Zelda, The - A Link to the Past (USA) [SNES, sd]
@@ -78,7 +78,7 @@ Found: 2 results
 ```
 
 ```bash
-clawexec-mister-fpga-send search "zelda" --json --timeout 30
+misterclaw-send search "zelda" --json --timeout 30
 ```
 ```json
 {
@@ -95,7 +95,7 @@ clawexec-mister-fpga-send search "zelda" --json --timeout 30
 
 By fuzzy search (picks best match):
 ```bash
-clawexec-mister-fpga-send launch "super mario world" --system SNES
+misterclaw-send launch "super mario world" --system SNES
 ```
 ```
 Launched: Super Mario World (USA)
@@ -103,7 +103,7 @@ Launched: Super Mario World (USA)
 
 By direct path:
 ```bash
-clawexec-mister-fpga-send launch --path "/media/usb0/SNES/Super Mario World (USA).sfc" --system SNES
+misterclaw-send launch --path "/media/usb0/SNES/Super Mario World (USA).sfc" --system SNES
 ```
 ```
 Launched: Super Mario World (USA)
@@ -111,14 +111,14 @@ Launched: Super Mario World (USA)
 
 Cross-system fuzzy search (no `--system`):
 ```bash
-clawexec-mister-fpga-send launch "sonic 2"
+misterclaw-send launch "sonic 2"
 ```
 ```
 Launched: Sonic The Hedgehog 2 (World)
 ```
 
 ```bash
-clawexec-mister-fpga-send launch "castlevania" --system NES --json
+misterclaw-send launch "castlevania" --system NES --json
 ```
 ```json
 {
@@ -132,7 +132,7 @@ clawexec-mister-fpga-send launch "castlevania" --system NES --json
 #### `systems` — List available systems and ROM counts
 
 ```bash
-clawexec-mister-fpga-send systems
+misterclaw-send systems
 ```
 ```
 SNES             13435 ROMs (sd)
@@ -146,7 +146,7 @@ PSX                342 ROMs (usb1)
 ```
 
 ```bash
-clawexec-mister-fpga-send systems --json
+misterclaw-send systems --json
 ```
 ```json
 {
@@ -165,7 +165,7 @@ clawexec-mister-fpga-send systems --json
 
 Base64 to stdout (for piping/agents):
 ```bash
-clawexec-mister-fpga-send screenshot
+misterclaw-send screenshot
 ```
 ```
 iVBORw0KGgoAAAANSUhEU...
@@ -173,7 +173,7 @@ iVBORw0KGgoAAAANSUhEU...
 
 Save to file:
 ```bash
-clawexec-mister-fpga-send screenshot --output shot.png
+misterclaw-send screenshot --output shot.png
 ```
 ```
 Screenshot saved: shot.png (148KB, SNES core)
@@ -181,7 +181,7 @@ Screenshot saved: shot.png (148KB, SNES core)
 
 JSON with metadata:
 ```bash
-clawexec-mister-fpga-send screenshot --json
+misterclaw-send screenshot --json
 ```
 ```json
 {
@@ -197,7 +197,7 @@ clawexec-mister-fpga-send screenshot --json
 #### `info` — System information
 
 ```bash
-clawexec-mister-fpga-send info
+misterclaw-send info
 ```
 ```
 Hostname: MiSTer
@@ -211,7 +211,7 @@ Uptime:   3d 14h
 ```
 
 ```bash
-clawexec-mister-fpga-send info --json
+misterclaw-send info --json
 ```
 ```json
 {
@@ -232,7 +232,7 @@ clawexec-mister-fpga-send info --json
 #### `tailscale` — VPN management
 
 ```bash
-clawexec-mister-fpga-send tailscale setup
+misterclaw-send tailscale setup
 ```
 ```
 Please authenticate: https://login.tailscale.com/a/abc123def456
@@ -241,7 +241,7 @@ Connected! IP: 100.92.156.99
 ```
 
 ```bash
-clawexec-mister-fpga-send tailscale status
+misterclaw-send tailscale status
 ```
 ```
 Tailscale: running
@@ -251,7 +251,7 @@ Online: yes
 ```
 
 ```bash
-clawexec-mister-fpga-send tailscale status --json
+misterclaw-send tailscale status --json
 ```
 ```json
 {
@@ -265,8 +265,8 @@ clawexec-mister-fpga-send tailscale status --json
 ```
 
 ```bash
-clawexec-mister-fpga-send tailscale start
-clawexec-mister-fpga-send tailscale stop
+misterclaw-send tailscale start
+misterclaw-send tailscale stop
 ```
 ```
 Tailscale start: OK
@@ -276,7 +276,7 @@ Tailscale stop: OK
 #### `shell` — Execute any command on MiSTer-FPGA
 
 ```bash
-clawexec-mister-fpga-send shell "ls /media/fat/games/"
+misterclaw-send shell "ls /media/fat/games/"
 ```
 ```
 SNES
@@ -287,7 +287,7 @@ GBA
 ```
 
 ```bash
-clawexec-mister-fpga-send shell "cat /proc/uptime" --json
+misterclaw-send shell "cat /proc/uptime" --json
 ```
 ```json
 {
@@ -299,7 +299,7 @@ clawexec-mister-fpga-send shell "cat /proc/uptime" --json
 #### `discover` — Scan LAN for MiSTer-FPGA servers
 
 ```bash
-clawexec-mister-fpga-send discover
+misterclaw-send discover
 ```
 ```
 Found 1 MiSTer-FPGA server(s):
@@ -307,7 +307,7 @@ Found 1 MiSTer-FPGA server(s):
 ```
 
 ```bash
-clawexec-mister-fpga-send discover --json
+misterclaw-send discover --json
 ```
 ```json
 [{"host": "10.0.0.8", "port": 9900, "core": "SNES_20250605"}]
@@ -319,56 +319,56 @@ clawexec-mister-fpga-send discover --json
 
 ```bash
 # 1. Install server on MiSTer-FPGA (SSH in first)
-wget -q https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-arm7 -O /tmp/clawexec-mister-fpga
-chmod +x /tmp/clawexec-mister-fpga
-/tmp/clawexec-mister-fpga --install
+wget -q https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-arm7 -O /tmp/misterclaw
+chmod +x /tmp/misterclaw
+/tmp/misterclaw --install
 # Binary copied to /media/fat/Scripts/, autostart configured
 
 # 2. Set up Tailscale VPN (on your machine with client installed)
-clawexec-mister-fpga-send tailscale setup
+misterclaw-send tailscale setup
 # → Returns auth URL — open it in browser to authenticate
 # → Polls until authenticated, returns Tailscale IP
 
 # 3. Get Tailscale IP
-clawexec-mister-fpga-send tailscale status --json
+misterclaw-send tailscale status --json
 # → {"running": true, "ip": "100.92.156.99", "hostname": "mister-fpga", "online": true, ...}
 
 # 4. From now on, default hostname "mister-fpga" or auto-discovery — no --host needed
-clawexec-mister-fpga-send status
+misterclaw-send status
 ```
 
 #### Launch a Game
 
 ```bash
 # 1. Search for the game (use --timeout 30 for large libraries)
-clawexec-mister-fpga-send search "super mario" --json --timeout 30
+misterclaw-send search "super mario" --json --timeout 30
 # → Returns list of matches with system, path, location
 
 # 2. Launch by fuzzy search (picks best match)
-clawexec-mister-fpga-send launch "super mario world" --system SNES
+misterclaw-send launch "super mario world" --system SNES
 
 # OR: Launch by exact path
-clawexec-mister-fpga-send launch --path "/media/fat/games/SNES/Super Mario World (USA).sfc" --system SNES
+misterclaw-send launch --path "/media/fat/games/SNES/Super Mario World (USA).sfc" --system SNES
 ```
 
 #### Check Status
 
 ```bash
-clawexec-mister-fpga-send status --json
+misterclaw-send status --json
 # → {"mister": "status", "core_name": "SNES", "core_path": "...", "game_path": "..."}
 ```
 
 #### Take a Screenshot
 
 ```bash
-clawexec-mister-fpga-send screenshot --json
+misterclaw-send screenshot --json
 # → {"mister": "screenshot", "success": true, "data": "<base64 PNG>", "core": "SNES", "filename": "...", "size": 151632}
 ```
 
 #### System Diagnostics
 
 ```bash
-clawexec-mister-fpga-send info --json
+misterclaw-send info --json
 # → hostname, IP, temp, RAM, all mounted disks, uptime
 ```
 
@@ -378,7 +378,7 @@ Systems are auto-detected from your ROM library — there is no hardcoded list. 
 
 Core matching is automatic: ROM folder names are matched to installed `.rbf` cores and `.mgl` mappings. Well-known systems (SNES, NES, Genesis, PSX, etc.) have curated MGL launch parameters built in as defaults. Unknown systems get sensible defaults — CD-based systems (with `.chd`/`.cue`/`.iso` files) are detected automatically.
 
-Use `clawexec-mister-fpga-send systems` to see all detected systems and ROM counts.
+Use `misterclaw-send systems` to see all detected systems and ROM counts.
 
 ### Background Discovery
 
@@ -420,29 +420,29 @@ Error: connecting to mister-fpga:9900: dial tcp: lookup mister-fpga: no such hos
 
 ### What Is This?
 
-ClawExec lets your AI agent control your MiSTer-FPGA. Search your game library, launch ROMs, take screenshots, check disk space, set up VPN access — all through natural conversation. You never need to learn CLI commands.
+MisterClaw lets your AI agent control your MiSTer-FPGA. Search your game library, launch ROMs, take screenshots, check disk space, set up VPN access — all through natural conversation. You never need to learn CLI commands.
 
 ### Setup
 
 **One-time install on MiSTer** (SSH in):
 ```bash
-wget -q https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-arm7 -O /tmp/clawexec-mister-fpga
-chmod +x /tmp/clawexec-mister-fpga
-/tmp/clawexec-mister-fpga --install
+wget -q https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-arm7 -O /tmp/misterclaw
+chmod +x /tmp/misterclaw
+/tmp/misterclaw --install
 ```
 
 **Install the client** on your machine (your agent uses this behind the scenes):
 ```bash
 # Linux
-wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-send-linux-amd64 -O clawexec-mister-fpga-send
-chmod +x clawexec-mister-fpga-send
+wget https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-send-linux-amd64 -O misterclaw-send
+chmod +x misterclaw-send
 
 # macOS
-wget https://github.com/catallo/clawexec-mister-fpga/releases/latest/download/clawexec-mister-fpga-send-darwin-arm64 -O clawexec-mister-fpga-send
-chmod +x clawexec-mister-fpga-send
+wget https://github.com/catallo/misterclaw/releases/latest/download/misterclaw-send-darwin-arm64 -O misterclaw-send
+chmod +x misterclaw-send
 ```
 
-To uninstall: `/media/fat/Scripts/clawexec-mister-fpga --uninstall`
+To uninstall: `/media/fat/Scripts/misterclaw --uninstall`
 
 ### What It Looks Like
 
@@ -519,14 +519,14 @@ Newline-delimited JSON over TCP (port 9900). Each request is a single JSON objec
 ## Building from Source
 
 ```bash
-git clone https://github.com/catallo/clawexec-mister-fpga.git
-cd clawexec-mister-fpga
+git clone https://github.com/catallo/misterclaw.git
+cd misterclaw
 
 # Build server (ARM7 for MiSTer)
-GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o clawexec-mister-fpga ./cmd/clawexec-mister-fpga/
+GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o misterclaw ./cmd/misterclaw/
 
 # Build client (for your machine)
-go build -ldflags="-s -w" -o clawexec-mister-fpga-send ./cmd/clawexec-mister-fpga-send/
+go build -ldflags="-s -w" -o misterclaw-send ./cmd/misterclaw-send/
 
 # Run tests
 go test ./...
@@ -537,8 +537,8 @@ go test ./...
 ## Architecture
 
 ```
-cmd/clawexec-mister-fpga/main.go       Server entry point, flags, signal handling
-cmd/clawexec-mister-fpga-send/main.go  Client CLI, subcommands, flag parsing
+cmd/misterclaw/main.go       Server entry point, flags, signal handling
+cmd/misterclaw-send/main.go  Client CLI, subcommands, flag parsing
 pkg/
   server/server.go                      TCP server, JSON protocol dispatch
   session/manager.go                    Session management, per-session locks
@@ -561,7 +561,7 @@ MIT
 
 ## Security
 
-> ⚠️ **Do not expose port 9900 to the internet.** The ClawExec protocol has no authentication or encryption.
+> ⚠️ **Do not expose port 9900 to the internet.** The MisterClaw protocol has no authentication or encryption.
 
 **Recommended setups:**
 - **Tailscale VPN** (best) — encrypted, authenticated, works from anywhere. Use Tailscale: already authenticated

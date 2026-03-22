@@ -240,7 +240,7 @@ func (o *OSD) renderNotification(title, subtitle string) {
 	o.Clear()
 
 	padding := 20
-	branding := "ClawExec for MiSTer"
+	branding := "MisterClaw"
 
 	// Calculate box dimensions
 	titleScale := 2
@@ -299,7 +299,7 @@ func (o *OSD) renderNotification(title, subtitle string) {
 
 // FormatNotificationText returns the lines that would be rendered (for testing).
 func FormatNotificationText(title, subtitle string) []string {
-	return []string{title, subtitle, "ClawExec for MiSTer"}
+	return []string{title, subtitle, "MisterClaw"}
 }
 
 // font8x16 contains the CP437 8x16 VGA font for ASCII 32-126.

@@ -61,7 +61,7 @@ func main() {
 	flag.Parse()
 
 	log.SetOutput(os.Stderr)
-	log.SetPrefix("[mister-fpga-mcp] ")
+	log.SetPrefix("[misterclaw-mcp] ")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -104,7 +104,7 @@ func handleRequest(req JSONRPCRequest) *JSONRPCResponse {
 				"protocolVersion": "2024-11-05",
 				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 				"serverInfo": map[string]interface{}{
-					"name":    "mister-fpga-mcp",
+					"name":    "misterclaw-mcp",
 					"version": "0.1.0",
 				},
 			},

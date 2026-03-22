@@ -268,7 +268,7 @@ func GenerateMGL(game GameInfo) string {
 	return xml.Header + string(output)
 }
 
-var mglLaunchPath = "/tmp/clawexec_launch.mgl"
+var mglLaunchPath = "/tmp/misterclaw_launch.mgl"
 
 // LaunchGame writes an MGL file and tells MiSTer to load it.
 func LaunchGame(game GameInfo) error {

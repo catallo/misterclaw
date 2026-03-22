@@ -37,7 +37,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("clawexec-mister-fpga-send v%s\n", Version)
+		fmt.Printf("misterclaw-send v%s\n", Version)
 		os.Exit(0)
 	}
 
@@ -131,7 +131,7 @@ func sendShellRequest(command string) (string, int, error) {
 
 	req := map[string]interface{}{
 		"cmd":     command,
-		"session": "clawexec-fpga-cli",
+		"session": "misterclaw-cli",
 		"pty":     false,
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
@@ -210,7 +210,7 @@ func cmdLaunch(args []string) error {
 	} else {
 		query := strings.Join(positional, " ")
 		if query == "" {
-			return fmt.Errorf("usage: clawexec-mister-fpga-send launch <query> [--system <system>]\n       clawexec-mister-fpga-send launch --path <path> --system <system>")
+			return fmt.Errorf("usage: misterclaw-send launch <query> [--system <system>]\n       misterclaw-send launch --path <path> --system <system>")
 		}
 		req["query"] = query
 		if system != "" {
@@ -245,7 +245,7 @@ func cmdSearch(args []string) error {
 
 	query := strings.Join(positional, " ")
 	if query == "" {
-		return fmt.Errorf("usage: clawexec-mister-fpga-send search <query> [--system <system>] [--limit N]")
+		return fmt.Errorf("usage: misterclaw-send search <query> [--system <system>] [--limit N]")
 	}
 
 	req := map[string]interface{}{
@@ -391,7 +391,7 @@ func cmdInfo() error {
 
 func cmdTailscale(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: clawexec-mister-fpga-send tailscale <setup|status|start|stop>")
+		return fmt.Errorf("usage: misterclaw-send tailscale <setup|status|start|stop>")
 	}
 
 	action := args[0]
@@ -522,7 +522,7 @@ func cmdTailscaleSimple(action string) error {
 func cmdShell(args []string) error {
 	command := strings.Join(args, " ")
 	if command == "" {
-		return fmt.Errorf("usage: clawexec-mister-fpga-send shell <command>")
+		return fmt.Errorf("usage: misterclaw-send shell <command>")
 	}
 
 	output, exitCode, err := sendShellRequest(command)
@@ -547,13 +547,13 @@ func cmdShell(args []string) error {
 }
 
 func printHelp() {
-	fmt.Print(`ClawExec for MiSTer-FPGA — Remote control for MiSTer-FPGA retro gaming platform.
+	fmt.Print(`MisterClaw — Remote control for MiSTer-FPGA retro gaming platform.
 
 QUICK START:
-  clawexec-mister-fpga-send --host 100.92.156.99 status
-  clawexec-mister-fpga-send launch "super mario world" --system SNES
-  clawexec-mister-fpga-send search "zelda"
-  clawexec-mister-fpga-send screenshot --output shot.png
+  misterclaw-send --host 100.92.156.99 status
+  misterclaw-send launch "super mario world" --system SNES
+  misterclaw-send search "zelda"
+  misterclaw-send screenshot --output shot.png
 
 COMMANDS:
   status        Show current core and game
@@ -574,17 +574,17 @@ GLOBAL FLAGS:
   --timeout, -t Timeout in seconds (default: 10)
 
 EXAMPLES:
-  clawexec-mister-fpga-send status
-  clawexec-mister-fpga-send status --json
-  clawexec-mister-fpga-send launch "sonic 2" --system MegaDrive
-  clawexec-mister-fpga-send launch --path "/media/usb0/SNES/Super Mario World (USA).sfc" --system SNES
-  clawexec-mister-fpga-send search "zelda" --system SNES --limit 5
-  clawexec-mister-fpga-send systems
-  clawexec-mister-fpga-send screenshot --output game.png
-  clawexec-mister-fpga-send info
-  clawexec-mister-fpga-send tailscale setup
-  clawexec-mister-fpga-send tailscale status
-  clawexec-mister-fpga-send shell "ls /media/fat/games/"
+  misterclaw-send status
+  misterclaw-send status --json
+  misterclaw-send launch "sonic 2" --system MegaDrive
+  misterclaw-send launch --path "/media/usb0/SNES/Super Mario World (USA).sfc" --system SNES
+  misterclaw-send search "zelda" --system SNES --limit 5
+  misterclaw-send systems
+  misterclaw-send screenshot --output game.png
+  misterclaw-send info
+  misterclaw-send tailscale setup
+  misterclaw-send tailscale status
+  misterclaw-send shell "ls /media/fat/games/"
 
 AGENT NOTES:
   - Use --json for machine-parseable output on any command

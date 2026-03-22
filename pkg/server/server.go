@@ -12,8 +12,8 @@ import (
 
 	"time"
 
-	"github.com/catallo/clawexec-mister-fpga/pkg/mister"
-	"github.com/catallo/clawexec-mister-fpga/pkg/session"
+	"github.com/catallo/misterclaw/pkg/mister"
+	"github.com/catallo/misterclaw/pkg/session"
 	"github.com/google/uuid"
 )
 
@@ -54,7 +54,7 @@ type ResizeRequest struct {
 	Rows int `json:"rows"`
 }
 
-// Server is a TCP server handling the ClawExec JSON protocol.
+// Server is a TCP server handling the MisterClaw JSON protocol.
 type Server struct {
 	listener net.Listener
 	manager  *session.Manager

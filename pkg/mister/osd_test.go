@@ -150,8 +150,8 @@ func TestFormatNotificationText(t *testing.T) {
 	if lines[1] != "Sonic the Hedgehog" {
 		t.Errorf("line 1 = %q, want %q", lines[1], "Sonic the Hedgehog")
 	}
-	if lines[2] != "ClawExec for MiSTer" {
-		t.Errorf("line 2 = %q, want %q", lines[2], "ClawExec for MiSTer")
+	if lines[2] != "MisterClaw" {
+		t.Errorf("line 2 = %q, want %q", lines[2], "MisterClaw")
 	}
 }
 

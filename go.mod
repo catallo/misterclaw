@@ -1,4 +1,4 @@
-module github.com/catallo/clawexec-mister-fpga
+module github.com/catallo/misterclaw
 
 go 1.21
 

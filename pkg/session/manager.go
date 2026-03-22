@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	ptyPkg "github.com/catallo/clawexec-mister-fpga/pkg/pty"
+	ptyPkg "github.com/catallo/misterclaw/pkg/pty"
 )
 
 // Status represents the state of a session.
