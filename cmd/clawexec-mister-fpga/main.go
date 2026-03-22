@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/catallo/clawexec-mister-fpga/pkg/mister"
 	"github.com/catallo/clawexec-mister-fpga/pkg/server"
 	"github.com/catallo/clawexec-mister-fpga/pkg/session"
 )
@@ -42,6 +43,9 @@ func main() {
 	log.SetPrefix("[clawexec-mister-fpga] ")
 
 	log.Printf("starting clawexec-mister-fpga on %s:%d (shell: %s)", *host, *port, *shell)
+
+	// Start background system discovery (scans ROM folders, cores, extensions)
+	mister.StartDiscovery()
 
 	mgr := session.NewManager(*shell)
 	srv := server.New(mgr)

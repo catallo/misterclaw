@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExtractCoreName(t *testing.T) {
@@ -204,6 +205,13 @@ func TestDiscoverSystems_FullIntegration(t *testing.T) {
 	consoleCoresPath = consoleDir
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
@@ -306,6 +314,13 @@ func TestDiscoverSystems_MGLMapping(t *testing.T) {
 	consoleCoresPath = consoleDir
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
@@ -349,6 +364,13 @@ func TestCaseInsensitiveMatching(t *testing.T) {
 	consoleCoresPath = filepath.Join(tmp, "_Console")
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
@@ -386,6 +408,13 @@ func TestInvalidateCache(t *testing.T) {
 	consoleCoresPath = filepath.Join(tmp, "_Console")
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
@@ -413,6 +442,12 @@ func TestInvalidateCache(t *testing.T) {
 
 	// After invalidation, SNES should appear
 	InvalidateCache()
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	systems = getDiscoveredSystems()
 	if _, ok := systems["snes"]; !ok {
 		t.Fatal("SNES should appear after cache invalidation")
@@ -449,6 +484,13 @@ func TestGenerateMGL_WithDiscoveredSystem(t *testing.T) {
 	consoleCoresPath = filepath.Join(tmp, "_Console")
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
@@ -498,6 +540,13 @@ func TestDiscoverSystems_EmptyFolder(t *testing.T) {
 	consoleCoresPath = filepath.Join(tmp, "_Console")
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
@@ -532,6 +581,13 @@ func TestExtensionDetection_CDSystems(t *testing.T) {
 	consoleCoresPath = filepath.Join(tmp, "_Console")
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	InvalidateCache()
+	// Wait for background discovery
+	for i := 0; i < 100; i++ {
+		if IsDiscoveryReady() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	defer func() {
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB

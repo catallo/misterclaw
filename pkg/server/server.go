@@ -332,6 +332,14 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 		send(info)
 
 	case "systems":
+		if !mister.IsDiscoveryReady() {
+			send(map[string]interface{}{
+				"mister": "systems",
+				"status": "pending",
+				"message": "System discovery is still running. Try again in a few seconds.",
+			})
+			return
+		}
 		stats := mister.GetSystemStats()
 		send(map[string]interface{}{
 			"mister":  "systems",
@@ -339,6 +347,14 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 		})
 
 	case "search":
+		if !mister.IsDiscoveryReady() {
+			send(map[string]interface{}{
+				"mister": "search",
+				"status": "pending",
+				"message": "System discovery is still running. Try again in a few seconds.",
+			})
+			return
+		}
 		results := mister.SearchGames(req.Query, req.System)
 		send(map[string]interface{}{
 			"mister":  "search",

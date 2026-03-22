@@ -48,30 +48,58 @@ var cdExtensions = map[string]bool{
 	".chd": true, ".cue": true, ".iso": true,
 }
 
-// Discovery cache.
+// Discovery cache with background scanning.
 var (
 	cachedSystems map[string]*DiscoveredSystem
-	cacheInit     bool
-	cacheMu       sync.Mutex
+	cacheReady    bool
+	cacheScanning bool
+	cacheMu       sync.RWMutex
 )
 
-// getDiscoveredSystems returns the cached discovery results, running discovery on first call.
-func getDiscoveredSystems() map[string]*DiscoveredSystem {
+// StartDiscovery begins background system discovery. Call once at server startup.
+func StartDiscovery() {
 	cacheMu.Lock()
-	defer cacheMu.Unlock()
-	if !cacheInit {
-		cachedSystems = discoverSystems()
-		cacheInit = true
+	if cacheScanning {
+		cacheMu.Unlock()
+		return
 	}
+	cacheScanning = true
+	cacheReady = false
+	cacheMu.Unlock()
+
+	go func() {
+		systems := discoverSystems()
+		cacheMu.Lock()
+		cachedSystems = systems
+		cacheReady = true
+		cacheScanning = false
+		cacheMu.Unlock()
+	}()
+}
+
+// IsDiscoveryReady returns true if background discovery has completed.
+func IsDiscoveryReady() bool {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
+	return cacheReady
+}
+
+// getDiscoveredSystems returns the cached discovery results.
+// Returns nil if discovery hasn't completed yet.
+func getDiscoveredSystems() map[string]*DiscoveredSystem {
+	cacheMu.RLock()
+	defer cacheMu.RUnlock()
 	return cachedSystems
 }
 
-// InvalidateCache clears the discovery cache, forcing re-discovery on next access.
+// InvalidateCache clears the discovery cache and triggers re-discovery.
 func InvalidateCache() {
 	cacheMu.Lock()
-	cacheInit = false
+	cacheReady = false
 	cachedSystems = nil
+	cacheScanning = false
 	cacheMu.Unlock()
+	StartDiscovery()
 }
 
 // extractCoreName strips the date suffix and .rbf extension from a core filename.
@@ -151,45 +179,23 @@ func parseMGLFiles() map[string]string {
 	return result
 }
 
-// scanFolderExtensions scans a directory for file extensions, excluding meta files.
-// Only scans top-level files + one level of subdirectories for performance on ARM.
+// scanFolderExtensions scans a directory recursively for file extensions, excluding meta files.
+// Runs in background at startup so performance is not an issue.
 // Returns extensions sorted by frequency (most common first) and total file count.
 func scanFolderExtensions(dir string) (extensions []string, count int) {
 	extCounts := make(map[string]int)
-
-	// Scan top-level entries
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, 0
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			// Scan one level deep (ROM subfolders like "Sonic The Hedgehog 2/")
-			subEntries, err := os.ReadDir(filepath.Join(dir, e.Name()))
-			if err != nil {
-				continue
-			}
-			for _, se := range subEntries {
-				if se.IsDir() {
-					continue
-				}
-				ext := strings.ToLower(filepath.Ext(se.Name()))
-				if ext == "" || metaExtensions[ext] {
-					continue
-				}
-				extCounts[ext]++
-				count++
-			}
-			continue
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(e.Name()))
+		ext := strings.ToLower(filepath.Ext(path))
 		if ext == "" || metaExtensions[ext] {
-			continue
+			return nil
 		}
 		extCounts[ext]++
 		count++
-	}
-
+		return nil
+	})
 	for ext := range extCounts {
 		extensions = append(extensions, ext)
 	}
