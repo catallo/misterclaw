@@ -296,7 +296,18 @@ func GenerateMGL(game GameInfo) string {
 	return xml.Header + string(output)
 }
 
-var mglLaunchPath = "/tmp/misterclaw_launch.mgl"
+const mglLaunchName = "_launch.mgl"
+
+// mglPath returns the MGL launch path placed in the core's parent directory.
+// This ensures MiSTer's OSD file browser shows the correct core category
+// (e.g. _Console/, _Computer/) instead of "No Files" after an MGL launch.
+func mglPath(corePath string) string {
+	parent := filepath.Dir(corePath)
+	if parent == "." || parent == "" {
+		return "/tmp/" + mglLaunchName
+	}
+	return filepath.Join("/media/fat", parent, mglLaunchName)
+}
 
 // LaunchGame writes an MGL file and tells MiSTer to load it.
 func LaunchGame(game GameInfo) error {
@@ -310,7 +321,13 @@ func LaunchGame(game GameInfo) error {
 		return fmt.Errorf("unknown system: %s", game.System)
 	}
 
-	if err := os.WriteFile(mglLaunchPath, []byte(mglContent), 0644); err != nil {
+	// Place MGL in core's parent dir so OSD browser has correct context
+	cfg, _ := GetSystemConfig(game.System)
+	launchPath := mglPath(cfg.Core)
+	if err := os.MkdirAll(filepath.Dir(launchPath), 0755); err != nil {
+		return fmt.Errorf("creating MGL dir: %w", err)
+	}
+	if err := os.WriteFile(launchPath, []byte(mglContent), 0644); err != nil {
 		return fmt.Errorf("writing MGL: %w", err)
 	}
 
@@ -329,14 +346,14 @@ func LaunchGame(game GameInfo) error {
 	//   GetOSD().ShowSplash("Loading...", game.Name)
 	//   time.Sleep(5 * time.Second)
 
-	if err := writeCmd("load_core " + mglLaunchPath); err != nil {
+	if err := writeCmd("load_core " + launchPath); err != nil {
 		return err
 	}
 
 	// For systems with post-launch actions (e.g. floppy-disk cores), perform
 	// an OSD Reset after launch so the core boots from the mounted disk
 	// instead of falling into built-in BASIC/ROM.
-	cfg, _ := GetSystemConfig(game.System)
+	cfg, _ = GetSystemConfig(game.System)
 	if cfg.PostLaunch != nil && cfg.PostLaunch.OSDReset {
 		coreName := filepath.Base(cfg.Core)
 		delay := time.Duration(cfg.PostLaunch.DelayMs) * time.Millisecond
