@@ -750,19 +750,12 @@ func (s *Server) handleRescan(req Request, send func(interface{})) {
 	location := req.Location
 	if location == "" {
 		mister.InvalidateCache()
-		// Wait for Phase 1 to complete
-		for i := 0; i < 100; i++ {
-			if mister.IsDiscoveryReady() {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		stats := mister.GetSystemStats()
+		// Respond immediately — scan runs in background
 		send(map[string]interface{}{
-			"mister":        "rescan",
-			"success":       true,
-			"systems_found": len(stats),
-			"location":      "all",
+			"mister":   "rescan",
+			"success":  true,
+			"message":  "Rescan started in background. Use 'systems' to check progress.",
+			"location": "all",
 		})
 		return
 	}

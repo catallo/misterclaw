@@ -187,15 +187,17 @@ func StartDiscovery() {
 		return
 	}
 
-	// Phase 1: fast discovery (folder names + systemDefaults)
-	systems := discoverSystemsFast()
-	cacheMu.Lock()
-	cachedSystems = systems
-	cacheReady = true
-	cacheMu.Unlock()
-
-	// Phase 2: full discovery + Phase 3: game collection in background
+	// All phases run in background so server can start accepting connections immediately
 	go func() {
+		// Phase 1: fast discovery (folder names + systemDefaults)
+		systems := discoverSystemsFast()
+		cacheMu.Lock()
+		cachedSystems = systems
+		cacheReady = true
+		cacheMu.Unlock()
+		log.Printf("discovery: phase 1 complete (%d systems)", len(systems))
+
+		// Phase 2: full discovery
 		discoverSystemsFull(systems)
 		cacheMu.Lock()
 		cacheComplete = true
@@ -320,7 +322,7 @@ func RescanLocation(location string) int {
 		dirPath := filepath.Join(parent, e.Name())
 		key := strings.ToLower(e.Name())
 
-		count := countTopLevelFiles(dirPath)
+		count := countFiles(dirPath)
 		if count == 0 {
 			continue
 		}
@@ -507,8 +509,8 @@ func getDefaultConfig(system string) (SystemConfig, bool) {
 	return SystemConfig{}, false
 }
 
-// countTopLevelFiles counts non-directory, non-meta entries in a directory (non-recursive).
-func countTopLevelFiles(dir string) int {
+// countFiles counts non-meta file entries in a directory (max 2 levels deep).
+func countFiles(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0
@@ -516,8 +518,21 @@ func countTopLevelFiles(dir string) int {
 	count := 0
 	for _, e := range entries {
 		if e.IsDir() {
-			// Count subdirectories as potential ROM containers (e.g. PSX game folders)
-			count++
+			// Count files in immediate subdirectories (e.g. GamesHDF/, Genre folders)
+			subEntries, err := os.ReadDir(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			for _, se := range subEntries {
+				if se.IsDir() {
+					count++ // PSX-style game folders
+					continue
+				}
+				ext := strings.ToLower(filepath.Ext(se.Name()))
+				if ext != "" && !metaExtensions[ext] {
+					count++
+				}
+			}
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(e.Name()))
@@ -548,7 +563,7 @@ func discoverSystemsFast() map[string]*DiscoveredSystem {
 
 			// For known systems, use systemDefaults extensions; count top-level only
 			if cfg, ok := getDefaultConfig(e.Name()); ok {
-				count := countTopLevelFiles(dirPath)
+				count := countFiles(dirPath)
 				if count == 0 {
 					continue
 				}
@@ -567,7 +582,7 @@ func discoverSystemsFast() map[string]*DiscoveredSystem {
 			}
 
 			// Unknown system: just check it has any non-meta files at top level
-			count := countTopLevelFiles(dirPath)
+			count := countFiles(dirPath)
 			if count == 0 {
 				continue
 			}
