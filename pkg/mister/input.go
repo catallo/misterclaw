@@ -595,3 +595,62 @@ func pressCombo(codes []int) error {
 
 	return nil
 }
+
+// OSDNavigateTo opens the OSD and navigates to a named menu item using
+// the conf_str database to calculate the correct position.
+// coreName is the core identifier (e.g. "PC88", "SNES") — date suffixes
+// are stripped and fuzzy matching is used against the conf_str DB.
+func OSDNavigateTo(coreName, target string) error {
+	db, err := GetConfStrDB()
+	if err != nil {
+		return fmt.Errorf("loading confstr db: %w", err)
+	}
+
+	pos, err := FindOSDItemPosition(db, coreName, target, nil)
+	if err != nil {
+		return err
+	}
+
+	// Open OSD
+	if err := PressKey("F12"); err != nil {
+		return fmt.Errorf("OSD open: %w", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// Navigate down to target position
+	for i := 0; i < pos; i++ {
+		if err := PressKey("down"); err != nil {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Confirm selection
+	return PressKey("enter")
+}
+
+// OSDResetByCore performs a soft reset via the OSD menu for a specific core.
+// Uses the conf_str database to find the correct Reset position.
+// This preserves mounted disk images unlike the hardware reset combo.
+func OSDResetByCore(coreName string) error {
+	return OSDNavigateTo(coreName, "Reset")
+}
+
+// OSDReset performs a soft reset via the OSD menu using a hardcoded
+// navigation path (2x Up from bottom). Deprecated: use OSDResetByCore
+// for conf_str-based navigation.
+func OSDReset() error {
+	if err := PressKey("F12"); err != nil {
+		return fmt.Errorf("OSD open: %w", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := PressKey("up"); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := PressKey("up"); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond)
+	return PressKey("enter")
+}

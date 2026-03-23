@@ -53,6 +53,9 @@ type Request struct {
 	Button   string   `json:"button,omitempty"`
 	DPad     string   `json:"dpad,omitempty"`
 
+	// OSD navigation
+	Target string `json:"target,omitempty"`
+
 	// CFG commands
 	Option   string `json:"option,omitempty"`
 	Value    string `json:"value,omitempty"`
@@ -603,7 +606,7 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 				send(map[string]interface{}{"error": "no core specified and " + err.Error()})
 				return
 			}
-			coreName = extractCoreName(status.CoreName)
+			coreName = mister.StripCoreDateSuffix(status.CoreName)
 		}
 
 		db, err := mister.GetConfStrDB()
@@ -650,31 +653,76 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 	case "rescan":
 		s.handleRescan(req, send)
 
+	case "osd_navigate":
+		target := req.Target
+		if target == "" {
+			send(map[string]interface{}{"error": "osd_navigate requires target"})
+			return
+		}
+		coreName := req.Core
+		if coreName == "" {
+			status, err := mister.GetRunningCore()
+			if err != nil {
+				send(map[string]interface{}{"error": "no core specified and " + err.Error()})
+				return
+			}
+			coreName = mister.StripCoreDateSuffix(status.CoreName)
+		}
+		if err := mister.OSDNavigateTo(coreName, target); err != nil {
+			send(map[string]interface{}{
+				"mister":  "osd_navigate",
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+		send(map[string]interface{}{
+			"mister":  "osd_navigate",
+			"success": true,
+			"target":  target,
+			"core":    coreName,
+		})
+
+	case "system_info":
+		system := req.System
+		if system == "" {
+			send(map[string]interface{}{"error": "system_info requires system"})
+			return
+		}
+		cfg, ok := mister.GetSystemConfig(system)
+		if !ok {
+			send(map[string]interface{}{
+				"mister":  "system_info",
+				"success": false,
+				"error":   fmt.Sprintf("unknown system: %s", system),
+			})
+			return
+		}
+		resp := map[string]interface{}{
+			"mister":  "system_info",
+			"success": true,
+			"system":  system,
+			"config":  cfg,
+		}
+		if cfg.PostLaunch != nil && cfg.PostLaunch.Notes != "" {
+			resp["notes"] = cfg.PostLaunch.Notes
+		}
+		db, err := mister.GetConfStrDB()
+		if err == nil {
+			coreName := filepath.Base(cfg.Core)
+			osd := mister.LookupCoreOSD(db, coreName)
+			if osd != nil {
+				resp["core_name"] = osd.CoreName
+				resp["menu"] = osd.Menu
+			}
+		}
+		send(resp)
+
 	default:
 		send(map[string]interface{}{
 			"error": fmt.Sprintf("unknown mister command: %s", req.MiSTer),
 		})
 	}
-}
-
-// extractCoreName strips date suffixes from core names (e.g. "SNES_20250605" -> "SNES").
-func extractCoreName(name string) string {
-	if idx := strings.LastIndex(name, "_"); idx > 0 {
-		suffix := name[idx+1:]
-		if len(suffix) == 8 {
-			allDigits := true
-			for _, c := range suffix {
-				if c < '0' || c > '9' {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				return name[:idx]
-			}
-		}
-	}
-	return name
 }
 
 // coreContext holds all resolved state for the current core: OSD info, CFG data, DIP data, paths.
@@ -750,7 +798,7 @@ func (s *Server) resolveCore(req Request, send func(interface{})) (*coreContext,
 			send(map[string]interface{}{"error": "no core specified and " + err.Error()})
 			return nil, false
 		}
-		coreName = extractCoreName(status.CoreName)
+		coreName = mister.StripCoreDateSuffix(status.CoreName)
 		// CFG name comes from the game (MRA), not the core
 		if status.GamePath != "" {
 			if strings.HasSuffix(strings.ToLower(status.GamePath), ".mra") {

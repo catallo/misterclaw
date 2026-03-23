@@ -212,7 +212,7 @@ func isValidCommandStart(entry string) bool {
 	case 'P':
 		return second >= '0' && second <= '9'
 	case 'R':
-		return second >= '0' && second <= '9' || second == ','
+		return (second >= '0' && second <= '9') || second == ',' || (second >= 'A' && second <= 'V')
 	case 'H', 'h':
 		return second >= '0' && second <= '9'
 	case 'D', 'd':
@@ -422,7 +422,7 @@ func parseSubPage(raw, rest string) *MenuItem {
 	}
 }
 
-// parseReset parses R[bit],[name]
+// parseReset parses R[bit],[name] where bit can be a digit or letter (A-V = 10-31).
 func parseReset(raw, rest string) *MenuItem {
 	parts := strings.SplitN(rest, ",", 2)
 	bit := 0
@@ -430,6 +430,8 @@ func parseReset(raw, rest string) *MenuItem {
 	if len(parts) >= 1 {
 		if b, err := strconv.Atoi(parts[0]); err == nil {
 			bit = b
+		} else if len(parts[0]) > 0 {
+			bit, _ = parseBitRange(parts[0])
 		}
 	}
 	if len(parts) >= 2 {
@@ -900,6 +902,87 @@ func FindOptionValue(item *MenuItem, valueName string) int {
 		}
 	}
 	return -1
+}
+
+// StripCoreDateSuffix strips date suffixes from core names.
+// "PC88_20250918" -> "PC88", "SNES_20250605" -> "SNES", "Menu" -> "Menu".
+func StripCoreDateSuffix(name string) string {
+	if idx := strings.LastIndex(name, "_"); idx > 0 {
+		suffix := name[idx+1:]
+		if len(suffix) == 8 {
+			allDigits := true
+			for _, c := range suffix {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return name[:idx]
+			}
+		}
+	}
+	return name
+}
+
+// NormalizeCoreName takes a running core name (e.g. "PC88_20250918" from the
+// RBF filename) and resolves it to the conf_str database core name (e.g. "PC8801").
+// Steps: strip date suffix, then fuzzy-match against the conf_str DB.
+// Returns the stripped name if no DB match is found.
+func NormalizeCoreName(runningName string) string {
+	stripped := StripCoreDateSuffix(runningName)
+	db, err := GetConfStrDB()
+	if err != nil {
+		return stripped
+	}
+	osd := LookupCoreOSD(db, stripped)
+	if osd != nil {
+		return osd.CoreName
+	}
+	return stripped
+}
+
+// isOSDTopLevelItem returns true if the menu item is a visible, navigable
+// entry in the MiSTer OSD top-level menu. Skips labels, metadata, hidden
+// items, and sub-page entries.
+func isOSDTopLevelItem(item MenuItem) bool {
+	switch item.Type {
+	case "label", "joystick", "separator", "version", "info",
+		"option_hidden", "trigger_hidden", "sub_page",
+		"hide", "hide_inverted", "disable", "disable_inverted":
+		return false
+	}
+	return true
+}
+
+// FindOSDItemPosition finds the 0-indexed position of a named target in the
+// MiSTer OSD top-level menu for a given core. The target is matched
+// case-insensitively against item Name and Label fields.
+// If cfgData is non-nil, hidden items are excluded from the count.
+func FindOSDItemPosition(db *ConfStrDB, coreName, target string, cfgData []byte) (int, error) {
+	osd := LookupCoreOSD(db, coreName)
+	if osd == nil {
+		return -1, fmt.Errorf("core not found in confstr db: %s", coreName)
+	}
+
+	// Re-parse from raw for most accurate menu structure
+	items := ParseConfStr(osd.ConfStrRaw)
+
+	targetLower := strings.ToLower(target)
+	pos := 0
+	for _, item := range items {
+		if !isOSDTopLevelItem(item) {
+			continue
+		}
+		if cfgData != nil && !item.Visible(cfgData) {
+			continue
+		}
+		if strings.ToLower(item.Name) == targetLower || strings.ToLower(item.Label) == targetLower {
+			return pos, nil
+		}
+		pos++
+	}
+	return -1, fmt.Errorf("target %q not found in OSD menu for core %s", target, coreName)
 }
 
 // LetterToBit converts a CONF_STR bit letter to a bit number.

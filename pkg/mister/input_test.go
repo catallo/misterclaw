@@ -1,7 +1,10 @@
 package mister
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -680,5 +683,106 @@ func TestKeyboardArcadeAliases(t *testing.T) {
 		if code != expected {
 			t.Errorf("keyboard alias %s: expected %d, got %d", name, expected, code)
 		}
+	}
+}
+
+// withTestConfStrDB sets up a temporary confstr DB for testing.
+func withTestConfStrDB(t *testing.T, db ConfStrDB) {
+	t.Helper()
+	data, err := json.Marshal(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "confstr_db.json")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := confstrDBPath
+	confstrDBPath = tmpFile
+	confstrDBOnce = syncOnce()
+	confstrDB = nil
+	t.Cleanup(func() {
+		confstrDBPath = oldPath
+		confstrDBOnce = syncOnce()
+		confstrDB = nil
+	})
+}
+
+func TestOSDNavigateTo(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	// MYCORE label(skip), file_load(0), sep(1), option(2), trigger Reset(3)
+	withTestConfStrDB(t, ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "MYCORE", ConfStrRaw: "MYCORE;;FS0,BIN,Load;-;O1,Opt,A,B;T0,Reset"},
+		},
+	})
+
+	err := OSDNavigateTo("MYCORE", "Reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := mock.getEvents()
+	// F12 (down+up) + 3x Down (down+up each) + Enter (down+up) = 10 events
+	expectedCount := 2 + 3*2 + 2
+	if len(events) != expectedCount {
+		t.Fatalf("expected %d events, got %d: %v", expectedCount, len(events), events)
+	}
+	// First event: F12 key down
+	if events[0].code != KeyNames["f12"] {
+		t.Errorf("first event should be F12, got code %d", events[0].code)
+	}
+	// Last two events: Enter down/up
+	if events[len(events)-2].code != KeyNames["enter"] {
+		t.Errorf("second-to-last event should be Enter, got code %d", events[len(events)-2].code)
+	}
+}
+
+func TestOSDResetByCore(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	// MYCORE label(skip), sep(0), Reset(1)
+	withTestConfStrDB(t, ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "MYCORE", ConfStrRaw: "MYCORE;;-;R0,Reset"},
+		},
+	})
+
+	err := OSDResetByCore("MYCORE")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := mock.getEvents()
+	// F12 (2) + 1x Down (2) + Enter (2) = 6 events
+	if len(events) != 6 {
+		t.Fatalf("expected 6 events, got %d: %v", len(events), events)
+	}
+	_ = mock
+}
+
+func TestOSDNavigateTo_CoreNotFound(t *testing.T) {
+	withMockKeyboard(t)
+	withTestConfStrDB(t, ConfStrDB{})
+
+	err := OSDNavigateTo("NonExistent", "Reset")
+	if err == nil {
+		t.Fatal("expected error for non-existent core")
+	}
+}
+
+func TestOSDNavigateTo_TargetNotFound(t *testing.T) {
+	withMockKeyboard(t)
+	withTestConfStrDB(t, ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "MYCORE", ConfStrRaw: "MYCORE;;T0,Reset"},
+		},
+	})
+
+	err := OSDNavigateTo("MYCORE", "NonExistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent target")
 	}
 }

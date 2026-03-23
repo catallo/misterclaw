@@ -2,20 +2,30 @@ package mister
 
 import (
 	"encoding/xml"
+	"log"
 	"fmt"
 	"os"
+	"time"
 	"path/filepath"
 	"strings"
 )
 
+// PostLaunchConfig defines actions to perform after launching a game.
+type PostLaunchConfig struct {
+	OSDReset bool   `json:"osd_reset"`          // perform OSD Reset after launch (floppy-disk cores)
+	DelayMs  int    `json:"delay_ms,omitempty"`  // delay before post-launch actions (ms)
+	Notes    string `json:"notes,omitempty"`     // usage notes for this system
+}
+
 // SystemConfig defines how to launch games for a given system.
 type SystemConfig struct {
-	Core       string   `json:"core"`
-	Delay      int      `json:"delay"`
-	Type       string   `json:"type"`       // "f" or "s"
-	Index      int      `json:"index"`
-	Extensions []string `json:"extensions"`
-	SetName    string   `json:"set_name,omitempty"` // optional, for systems sharing a core (GBC, GameGear, etc.)
+	Core       string           `json:"core"`
+	Delay      int              `json:"delay"`
+	Type       string           `json:"type"`       // "f" or "s"
+	Index      int              `json:"index"`
+	Extensions []string         `json:"extensions"`
+	SetName    string           `json:"set_name,omitempty"`    // optional, for systems sharing a core (GBC, GameGear, etc.)
+	PostLaunch *PostLaunchConfig `json:"post_launch,omitempty"` // post-launch actions (OSD reset, notes)
 }
 
 // GameInfo represents a single ROM file.
@@ -95,7 +105,7 @@ var systemDefaults = map[string]SystemConfig{
 	"Altair8800":  {Core: "_Computer/Altair8800", Delay: 1, Type: "f", Index: 1, Extensions: []string{".bin"}},
 	"PDP1":        {Core: "_Computer/PDP1", Delay: 1, Type: "f", Index: 1, Extensions: []string{".bin", ".rim"}},
 	"PET":         {Core: "_Computer/PET2001", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg"}},
-	"PC8801":      {Core: "_Computer/PC88", Delay: 2, Type: "s", Index: 0, Extensions: []string{".d88"}},
+	"PC8801":      {Core: "_Computer/PC88", Delay: 2, Type: "s", Index: 0, Extensions: []string{".d88"}, PostLaunch: &PostLaunchConfig{OSDReset: true, DelayMs: 4000, Notes: "STOP=End, CLR=Home, GRPH=Alt, HELP=F11. 2 FDD drives (D88)."}},
 
 }
 
@@ -105,7 +115,14 @@ func GetSystemConfig(system string) (SystemConfig, bool) {
 	// Check discovered systems first
 	discovered := getDiscoveredSystems()
 	if ds, ok := discovered[strings.ToLower(system)]; ok {
-		return ds.Config, true
+		cfg := ds.Config
+		// Merge PostLaunch from systemDefaults if not set by discovery
+		if cfg.PostLaunch == nil {
+			if defCfg, ok := getDefaultConfig(system); ok && defCfg.PostLaunch != nil {
+				cfg.PostLaunch = defCfg.PostLaunch
+			}
+		}
+		return cfg, true
 	}
 	// Fall back to systemDefaults
 	return getDefaultConfig(system)
@@ -312,5 +329,25 @@ func LaunchGame(game GameInfo) error {
 	//   GetOSD().ShowSplash("Loading...", game.Name)
 	//   time.Sleep(5 * time.Second)
 
-	return writeCmd("load_core " + mglLaunchPath)
+	if err := writeCmd("load_core " + mglLaunchPath); err != nil {
+		return err
+	}
+
+	// For systems with post-launch actions (e.g. floppy-disk cores), perform
+	// an OSD Reset after launch so the core boots from the mounted disk
+	// instead of falling into built-in BASIC/ROM.
+	cfg, _ := GetSystemConfig(game.System)
+	if cfg.PostLaunch != nil && cfg.PostLaunch.OSDReset {
+		coreName := filepath.Base(cfg.Core)
+		delay := time.Duration(cfg.PostLaunch.DelayMs) * time.Millisecond
+		if delay == 0 {
+			delay = 4 * time.Second
+		}
+		go func() {
+			time.Sleep(delay)
+			if err := OSDResetByCore(coreName); err != nil { log.Printf("[misterclaw] OSD reset failed: %v", err) } else { log.Printf("[misterclaw] OSD reset completed for %s", coreName) }
+		}()
+	}
+
+	return nil
 }

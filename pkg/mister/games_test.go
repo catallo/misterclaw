@@ -293,6 +293,44 @@ func TestScanDir_Subdirectories(t *testing.T) {
 	}
 }
 
+func TestPostLaunchConfig(t *testing.T) {
+	// PC8801 should have PostLaunch with OSDReset
+	cfg, ok := GetSystemConfig("PC8801")
+	if !ok {
+		t.Fatal("PC8801 not found")
+	}
+	if cfg.PostLaunch == nil {
+		t.Fatal("PC8801 should have PostLaunch config")
+	}
+	if !cfg.PostLaunch.OSDReset {
+		t.Error("PC8801 should have PostLaunch.OSDReset=true")
+	}
+	if cfg.PostLaunch.DelayMs != 4000 {
+		t.Errorf("PC8801 PostLaunch.DelayMs = %d, want 4000", cfg.PostLaunch.DelayMs)
+	}
+	if cfg.PostLaunch.Notes == "" {
+		t.Error("PC8801 should have PostLaunch.Notes")
+	}
+
+	// SNES should NOT have PostLaunch
+	cfg, ok = GetSystemConfig("SNES")
+	if !ok {
+		t.Fatal("SNES not found")
+	}
+	if cfg.PostLaunch != nil {
+		t.Error("SNES should not have PostLaunch config")
+	}
+
+	// PSX uses type "s" but should NOT have PostLaunch
+	cfg, ok = GetSystemConfig("PSX")
+	if !ok {
+		t.Fatal("PSX not found")
+	}
+	if cfg.PostLaunch != nil {
+		t.Error("PSX should not have PostLaunch config")
+	}
+}
+
 func TestMGLXMLHeader(t *testing.T) {
 	game := GameInfo{
 		Name:   "Test",

@@ -528,3 +528,209 @@ func findStr(s, sub string) bool {
 
 // syncOnce returns a fresh sync.Once (for testing).
 func syncOnce() sync.Once { return sync.Once{} }
+
+func TestParseReset_LetterBit(t *testing.T) {
+	items := ParseConfStr("CORE;;RF,SYNC FD0;RG,SYNC FD1;R6,Reset")
+	var resets []MenuItem
+	for _, item := range items {
+		if item.Type == "reset" {
+			resets = append(resets, item)
+		}
+	}
+	if len(resets) != 3 {
+		t.Fatalf("expected 3 reset items, got %d", len(resets))
+	}
+	// RF → bit 15
+	if resets[0].Name != "SYNC FD0" || resets[0].Bit != 15 {
+		t.Errorf("RF: got name=%q bit=%d, want name=SYNC FD0 bit=15", resets[0].Name, resets[0].Bit)
+	}
+	// RG → bit 16
+	if resets[1].Name != "SYNC FD1" || resets[1].Bit != 16 {
+		t.Errorf("RG: got name=%q bit=%d, want name=SYNC FD1 bit=16", resets[1].Name, resets[1].Bit)
+	}
+	// R6 → bit 6
+	if resets[2].Name != "Reset" || resets[2].Bit != 6 {
+		t.Errorf("R6: got name=%q bit=%d, want name=Reset bit=6", resets[2].Name, resets[2].Bit)
+	}
+}
+
+func TestStripCoreDateSuffix(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"PC88_20250918", "PC88"},
+		{"SNES_20250605", "SNES"},
+		{"MegaDrive_20250707", "MegaDrive"},
+		{"Menu", "Menu"},
+		{"PC88", "PC88"},
+		{"core_v2", "core_v2"},
+	}
+	for _, tt := range tests {
+		got := StripCoreDateSuffix(tt.input)
+		if got != tt.want {
+			t.Errorf("StripCoreDateSuffix(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestIsOSDTopLevelItem(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want bool
+	}{
+		{"option", true},
+		{"trigger", true},
+		{"reset", true},
+		{"separator", true},
+		{"mount", true},
+		{"file_load", true},
+		{"file_load_core", true},
+		{"cheat", true},
+		{"dip", true},
+		{"label", false},
+		{"joystick", false},
+		{"version", false},
+		{"info", false},
+		{"option_hidden", false},
+		{"trigger_hidden", false},
+		{"sub_page", false},
+		{"hide", false},
+		{"hide_inverted", false},
+		{"disable", false},
+		{"disable_inverted", false},
+	}
+	for _, tt := range tests {
+		got := isOSDTopLevelItem(MenuItem{Type: tt.typ})
+		if got != tt.want {
+			t.Errorf("isOSDTopLevelItem(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}
+
+func TestFindOSDItemPosition_PC8801(t *testing.T) {
+	raw := "PC8801;;-;O12,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];O34,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;OHJ,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;-;O78,Mode,N88V2,N88V1H,N88V1S,N;O9,Speed,4MHz,8MHz;-;S0,D88,FDD0;S1,D88,FDD1;RF,SYNC FD0;RG,SYNC FD1;-;OA,Basic mode,Basic,Terminal;OB,Cols,80,40;OC,Lines,25,20;OD,Disk boot,Enable,Disable;-;OK,Input,Joypad,Mouse;OL,Sound Board 2,Expansion,Onboard;-;R6,Reset;J,Fire 1,Fire 2;V,v"
+	db := &ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "PC8801", Repo: "MiSTer-devel/PC88_MiSTer", ConfStrRaw: raw},
+		},
+	}
+
+	pos, err := FindOSDItemPosition(db, "PC8801", "Reset", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Visible top-level items:
+	// sep(0) Aspect(1) Scale(2) Scandoubler(3) sep(4) Mode(5) Speed(6)
+	// sep(7) FDD0(8) FDD1(9) SYNC_FD0(10) SYNC_FD1(11)
+	// sep(12) Basic(13) Cols(14) Lines(15) Disk_boot(16)
+	// sep(17) Input(18) SoundBoard2(19) sep(20) Reset(21)
+	if pos != 21 {
+		t.Errorf("PC8801 Reset: expected position 21, got %d", pos)
+	}
+
+	// Test finding mount by label
+	pos, err = FindOSDItemPosition(db, "PC8801", "FDD0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pos != 8 {
+		t.Errorf("PC8801 FDD0: expected position 8, got %d", pos)
+	}
+}
+
+func TestFindOSDItemPosition_SimpleCore(t *testing.T) {
+	raw := "MYCORE;;FS0,BIN,Load;-;O1,Opt,A,B;T0,Reset;R0,Reset;V,v1"
+	db := &ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "MYCORE", ConfStrRaw: raw},
+		},
+	}
+
+	// Visible: file_load(0), sep(1), option(2), trigger"Reset"(3), reset"Reset"(4)
+	pos, err := FindOSDItemPosition(db, "MYCORE", "Reset", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First "Reset" match is the trigger at position 3
+	if pos != 3 {
+		t.Errorf("SimpleCore Reset: expected position 3, got %d", pos)
+	}
+}
+
+func TestFindOSDItemPosition_NotFound(t *testing.T) {
+	db := &ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "TestCore", ConfStrRaw: "TestCore;;T0,Reset"},
+		},
+	}
+	_, err := FindOSDItemPosition(db, "TestCore", "NonExistent", nil)
+	if err == nil {
+		t.Error("expected error for non-existent target")
+	}
+}
+
+func TestFindOSDItemPosition_CoreNotFound(t *testing.T) {
+	db := &ConfStrDB{}
+	_, err := FindOSDItemPosition(db, "UnknownCore", "Reset", nil)
+	if err == nil {
+		t.Error("expected error for unknown core")
+	}
+}
+
+func TestFindOSDItemPosition_FuzzyMatch(t *testing.T) {
+	raw := "PC8801;;-;R6,Reset;V,v"
+	db := &ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "PC8801", Repo: "MiSTer-devel/PC88_MiSTer", ConfStrRaw: raw},
+		},
+	}
+	// PC88 should match PC8801 via repo name
+	pos, err := FindOSDItemPosition(db, "PC88", "Reset", nil)
+	if err != nil {
+		t.Fatalf("fuzzy match PC88 → PC8801 failed: %v", err)
+	}
+	// sep(0), Reset(1)
+	if pos != 1 {
+		t.Errorf("expected position 1, got %d", pos)
+	}
+}
+
+func TestNormalizeCoreName(t *testing.T) {
+	// Set up a test DB with PC8801
+	db := ConfStrDB{
+		Cores: []CoreOSD{
+			{CoreName: "PC8801", RbfName: "PC88", Repo: "MiSTer-devel/PC88_MiSTer", ConfStrRaw: "PC8801;;R6,Reset"},
+			{CoreName: "SNES", RbfName: "SNES", Repo: "MiSTer-devel/SNES_MiSTer", ConfStrRaw: "SNES;;T0,Reset"},
+		},
+	}
+	data, _ := json.Marshal(db)
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "confstr_db.json")
+	os.WriteFile(tmpFile, data, 0644)
+
+	oldPath := confstrDBPath
+	confstrDBPath = tmpFile
+	confstrDBOnce = syncOnce()
+	confstrDB = nil
+	defer func() {
+		confstrDBPath = oldPath
+		confstrDBOnce = syncOnce()
+		confstrDB = nil
+	}()
+
+	tests := []struct {
+		input, want string
+	}{
+		{"PC88_20250918", "PC8801"},  // strip date + fuzzy match via rbf_name
+		{"SNES_20250605", "SNES"},    // strip date + exact match
+		{"SNES", "SNES"},             // already clean
+		{"UnknownCore_20250101", "UnknownCore"}, // strip date, no DB match
+		{"Menu", "Menu"},             // no date suffix, no DB match
+	}
+	for _, tt := range tests {
+		got := NormalizeCoreName(tt.input)
+		if got != tt.want {
+			t.Errorf("NormalizeCoreName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

@@ -81,6 +81,11 @@ var va7deoCoreRepos = []string{
 	"ArmedF",
 }
 
+// zakk4223 repos — Raizing/8ing arcade cores (Coin-Op Collection source)
+var zakk4223CoreRepos = []string{
+	"Arcade-Raizing_MiSTer",
+}
+
 
 func main() {
 	output := flag.String("output", "confstr_db.json", "Output JSON file path")
@@ -178,6 +183,23 @@ func main() {
 		}
 	}
 	log.Printf("va7deo: %d cores", va7deoCount)
+
+	// --- Source 5: zakk4223 individual repos (Raizing/8ing, Coin-Op Collection source) ---
+	log.Println("=== Source 5: zakk4223 ===")
+	zakk4223Count := 0
+	for _, repoName := range zakk4223CoreRepos {
+		repo := ghRepo{
+			Name:     repoName,
+			FullName: "zakk4223/" + repoName,
+		}
+		core := processRepo(client, token, *cacheDir, repo)
+		if core != nil {
+			allCores = append(allCores, *core)
+			zakk4223Count++
+			log.Printf("  [OK] %s -> %s (%d menu items)", repo.FullName, core.CoreName, len(core.Menu))
+		}
+	}
+	log.Printf("zakk4223: %d cores", zakk4223Count)
 
 	db := mister.ConfStrDB{
 		Version: time.Now().UTC().Format("2006-01-02"),
@@ -343,10 +365,17 @@ func parseJotegoMacrosInto(client *http.Client, token, coreName, content string,
 			continue
 		}
 
-		// Key=value or bare key (boolean)
+		// Key=value, key+=value (append), or bare key (boolean)
 		if idx := strings.Index(line, "="); idx > 0 {
 			key := strings.TrimSpace(line[:idx])
 			value := strings.TrimSpace(line[idx+1:])
+			// Handle += append syntax (e.g. CORE_OSD+=O7,Option,A,B)
+			if strings.HasSuffix(key, "+") {
+				key = strings.TrimSuffix(key, "+")
+				if prev, ok := macros[key].(string); ok {
+					value = prev + value
+				}
+			}
 			macros[key] = value
 		} else {
 			// Bare macro name = boolean true
