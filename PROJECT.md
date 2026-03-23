@@ -187,3 +187,6 @@ scp misterclaw root@10.0.0.8:/media/fat/Scripts/
 - **Dynamic core detection** — scan for .rbf files, dont hardcode date suffixes
 - **Graceful degradation** — clear errors when cores/ROMs missing, never crash
 - **Zero config** — works out of the box with no config file needed
+
+## Testing
+See [TESTING.md](TESTING.md) for the core-by-core test plan. Current focus: stability over features.
