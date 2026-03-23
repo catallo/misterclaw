@@ -294,7 +294,10 @@ func GenerateMGL(game GameInfo) string {
 	if err != nil {
 		return ""
 	}
-	return xml.Header + string(output)
+	// MiSTer's MGL parser doesn't decode XML entities in file paths.
+	// Single quotes are safe in XML attributes and must stay unescaped.
+	result := strings.ReplaceAll(string(output), "&#39;", "'")
+	return xml.Header + result
 }
 
 // mglPath returns the MGL launch path using the core's base name.
