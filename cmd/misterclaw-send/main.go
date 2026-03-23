@@ -246,6 +246,15 @@ func cmdLaunch(args []string) error {
 		return nil
 	}
 
+	if status, ok := resp["status"].(string); ok && status == "pending" {
+		if msg, ok := resp["message"].(string); ok {
+			fmt.Println(msg)
+		}
+		return nil
+	}
+	if errMsg, ok := resp["error"].(string); ok {
+		return fmt.Errorf("%s", errMsg)
+	}
 	game, _ := resp["game"].(string)
 	fmt.Printf("Launched: %s\n", game)
 	return nil
@@ -299,6 +308,12 @@ func cmdSearch(args []string) error {
 		}
 	}
 	total, _ := resp["total"].(float64)
+	if status, ok := resp["status"].(string); ok && status == "pending" {
+		if msg, ok := resp["message"].(string); ok {
+			fmt.Println(msg)
+		}
+		return nil
+	}
 	fmt.Printf("Found: %d results\n", int(total))
 	return nil
 }
@@ -874,9 +889,13 @@ func cmdRescan(args []string) error {
 		return nil
 	}
 
-	systemsFound, _ := resp["systems_found"].(float64)
-	loc, _ := resp["location"].(string)
-	fmt.Printf("Rescan complete: %d systems found (location: %s)\n", int(systemsFound), loc)
+	if msg, ok := resp["message"].(string); ok {
+		fmt.Println(msg)
+	}
+	if sf, ok := resp["systems_found"].(float64); ok && sf > 0 {
+		loc, _ := resp["location"].(string)
+		fmt.Printf("Rescan complete: %d systems found (location: %s)\n", int(sf), loc)
+	}
 	return nil
 }
 

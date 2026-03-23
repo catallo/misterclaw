@@ -351,7 +351,7 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 			send(map[string]interface{}{
 				"mister":  "systems",
 				"status":  "pending",
-				"message": "System discovery is still running. Try again in a few seconds.",
+				"message": "System discovery is in progress. This may take several minutes on large ROM collections. Try again shortly.",
 			})
 			return
 		}
@@ -366,7 +366,7 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 			send(map[string]interface{}{
 				"mister":  "search",
 				"status":  "pending",
-				"message": "System discovery is still running. Please wait.",
+				"message": "Game library scan is in progress. This may take several minutes on large ROM collections. Results will be available once the scan completes.",
 			})
 			return
 		}
@@ -396,6 +396,15 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 		}
 
 		if game == nil {
+			if !mister.IsGamesReady() {
+				send(map[string]interface{}{
+					"mister":  "launch",
+					"success": false,
+					"status":  "pending",
+					"message": "Game library scan is in progress. The game may exist but hasn't been indexed yet. This may take several minutes on large ROM collections.",
+				})
+				return
+			}
 			send(map[string]interface{}{
 				"mister":  "launch",
 				"success": false,
@@ -754,7 +763,7 @@ func (s *Server) handleRescan(req Request, send func(interface{})) {
 		send(map[string]interface{}{
 			"mister":   "rescan",
 			"success":  true,
-			"message":  "Rescan started in background. Use 'systems' to check progress.",
+			"message":  "Rescan started in background. Discovery may take several minutes on large ROM collections. Use 'systems' to check progress.",
 			"location": "all",
 		})
 		return
