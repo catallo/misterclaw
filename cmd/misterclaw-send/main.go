@@ -1041,7 +1041,7 @@ COMMANDS:
   input         Send input (key/raw/combo)
   osd-info      Show OSD menu structure for current or specified core
   osd-visible   Show only visible OSD menu items (based on CFG state)
-  osd-navigate  Navigate to a specific OSD menu item by name
+  osd-navigate  Navigate to a specific OSD menu item by name (experimental)
   system-info   Get system config, notes, and OSD menu for a system
   cfg-read      Read current CFG file and decode option values
   cfg-write     Set a core option by name (with automatic backup)

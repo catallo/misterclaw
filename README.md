@@ -2,14 +2,14 @@
 
 MiSTerClaw is the first MCP server for MiSTer-FPGA. Control your MiSTer from any AI agent.
 
-![Version](https://img.shields.io/badge/Version-v0.6.0-blue)
+![Version](https://img.shields.io/badge/Version-v0.7.0-blue)
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-ARMv7_(DE10--Nano)-blue)
 
 ## What is this?
 
-MiSTerClaw lets AI agents — Claude, ChatGPT, OpenClaw, Hermes, Cursor, and others — control a MiSTer-FPGA over the network. Launch games, search your ROM library, take screenshots, read and modify core settings and DIP switches, navigate the OSD menu using conf_str-based position calculation, query detailed system information, manage the system, and even set up Tailscale VPN for secure remote access from anywhere. Floppy-disk cores (PC8801, MSX, etc.) support PostLaunch auto-reset for seamless game loading. It uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) standard, so any MCP-compatible client works out of the box. For agents without MCP support, a CLI client is also included.
+MiSTerClaw lets AI agents — Claude, ChatGPT, OpenClaw, Hermes, Cursor, and others — control a MiSTer-FPGA over the network. Launch games, search your ROM library, take screenshots, read and modify core settings and DIP switches, navigate the OSD menu using conf_str-based position calculation (experimental, not yet reliable for all cores), query detailed system information, manage the system, and even set up Tailscale VPN for secure remote access from anywhere. Floppy-disk cores (PC8801, MSX, etc.) support PostLaunch auto-reset for seamless game loading. It uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) standard, so any MCP-compatible client works out of the box. For agents without MCP support, a CLI client is also included.
 
 ## MCP Setup
 

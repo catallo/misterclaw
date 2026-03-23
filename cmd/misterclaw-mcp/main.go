@@ -313,7 +313,7 @@ func toolsList() []ToolDef {
 		},
 		{
 			Name:        "mister_osd_navigate",
-			Description: "Navigate to a specific OSD menu item by name. Opens the OSD (F12) and navigates to the target item using conf_str-based position calculation. Works for Reset, options, file mounts, triggers etc. Uses the currently loaded core.",
+			Description: "Navigate to a specific OSD menu item by name (experimental — not yet reliable for all cores). Opens the OSD (F12) and navigates to the target item using conf_str-based position calculation. Works for Reset, options, file mounts, triggers etc. Uses the currently loaded core. Note: cores with runtime-hidden items may cause incorrect positioning.",
 			InputSchema: map[string]interface{}{
 				"type":     "object",
 				"required": []string{"target"},
