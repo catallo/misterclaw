@@ -296,17 +296,18 @@ func GenerateMGL(game GameInfo) string {
 	return xml.Header + string(output)
 }
 
-const mglLaunchName = "_launch.mgl"
-
-// mglPath returns the MGL launch path placed in the core's parent directory.
-// This ensures MiSTer's OSD file browser shows the correct core category
-// (e.g. _Console/, _Computer/) instead of "No Files" after an MGL launch.
+// mglPath returns the MGL launch path using the core's base name.
+// MiSTer derives CFG config filenames from the MGL filename, so using the
+// core name (e.g. PSX.mgl) ensures MiSTer loads PSX.CFG instead of _launch.CFG.
+// The MGL is placed in the core's parent directory so the OSD file browser
+// shows the correct category (e.g. _Console/, _Computer/).
 func mglPath(corePath string) string {
+	base := filepath.Base(corePath)
 	parent := filepath.Dir(corePath)
 	if parent == "." || parent == "" {
-		return "/tmp/" + mglLaunchName
+		return "/tmp/" + base + ".mgl"
 	}
-	return filepath.Join("/media/fat", parent, mglLaunchName)
+	return filepath.Join("/media/fat", parent, base+".mgl")
 }
 
 // LaunchGame writes an MGL file and tells MiSTer to load it.
