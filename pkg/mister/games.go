@@ -22,9 +22,11 @@ type FormatOverride struct {
 	Type           string   `json:"type"`            // "f" or "s"
 	Index          int      `json:"index"`
 	Extensions     []string `json:"extensions"`      // which extensions trigger this override
-	PostLaunchText string   `json:"post_launch_text,omitempty"` // text to type after launch (e.g. LOAD command)
-	PostLaunchRun  bool     `json:"post_launch_run,omitempty"`  // type RUN after PostLaunchText
-	DelayMs        int      `json:"delay_ms,omitempty"`         // delay before typing (0 = 6000ms default)
+	PostLaunchText  string   `json:"post_launch_text,omitempty"`  // text to type after launch (e.g. LOAD command)
+	PostLaunchRun   bool     `json:"post_launch_run,omitempty"`   // type RUN after PostLaunchText
+	PostLaunchCombo []string `json:"post_launch_combo,omitempty"` // key combo to press after launch (e.g. ["leftalt","esc"])
+	PostLaunchKeys  []string `json:"post_launch_keys,omitempty"`  // sequence of keys to press after launch
+	DelayMs         int      `json:"delay_ms,omitempty"`          // delay before actions (0 = 6000ms default)
 }
 
 // SystemConfig defines how to launch games for a given system.
@@ -97,14 +99,14 @@ var systemDefaults = map[string]SystemConfig{
 	// === Computers ===
 	"Amiga":       {Core: "_Computer/Minimig", Delay: 1, Type: "s", Index: 0, Extensions: []string{".adf", ".hdf"}},
 	"C64":         {Core: "_Computer/C64", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64", ".t64", ".g64", ".tap", ".d81"}, PostLaunch: &PostLaunchConfig{Notes: "PRG: auto-injected (no disk needed). CRT: cartridge, instant boot. D64: 1541 floppy image. G64: GCR-encoded floppy. T64: tape container. TAP: datasette recording. D81: 1581 3.5 inch floppy. Joystick: most games use Port 2."}, FormatOverrides: []FormatOverride{
-		{Type: "s", Index: 0, Extensions: []string{".d64", ".g64"}, PostLaunchText: "load\"*\",8,1\n", PostLaunchRun: true, DelayMs: 8000},
-		{Type: "s", Index: 0, Extensions: []string{".d81"}, PostLaunchText: "load\"*\",8,1\n", PostLaunchRun: true, DelayMs: 8000},
+		{Type: "s", Index: 0, Extensions: []string{".d64", ".g64", ".t64", ".d81"}, PostLaunchCombo: []string{"leftalt", "esc"}, DelayMs: 8000},
+		{Type: "f", Index: 1, Extensions: []string{".tap"}, PostLaunchText: "load\n", PostLaunchKeys: []string{"pageup"}, DelayMs: 8000},
 	}},
 	"C128":        {Core: "_Computer/C128", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64"}, FormatOverrides: []FormatOverride{
-		{Type: "s", Index: 0, Extensions: []string{".d64"}, PostLaunchText: "load\"*\",8,1\n", PostLaunchRun: true, DelayMs: 8000},
+		{Type: "s", Index: 0, Extensions: []string{".d64"}, PostLaunchCombo: []string{"leftalt", "esc"}, DelayMs: 8000},
 	}},
 	"VIC20":       {Core: "_Computer/VIC20", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64"}, FormatOverrides: []FormatOverride{
-		{Type: "s", Index: 0, Extensions: []string{".d64"}, PostLaunchText: "load\"*\",8,1\n", PostLaunchRun: true, DelayMs: 8000},
+		{Type: "s", Index: 0, Extensions: []string{".d64"}, PostLaunchCombo: []string{"leftalt", "esc"}, DelayMs: 8000},
 	}},
 	"AtariST":     {Core: "_Computer/AtariST", Delay: 1, Type: "s", Index: 0, Extensions: []string{".st", ".msa", ".stx"}},
 	"MSX":         {Core: "_Computer/MSX", Delay: 1, Type: "f", Index: 1, Extensions: []string{".rom", ".mx1", ".mx2"}},
@@ -418,28 +420,53 @@ func LaunchGame(game GameInfo) error {
 		}()
 	}
 
-	// Format-specific post-launch: type commands (e.g. LOAD"*",8,1 for D64)
-	if ov := getFormatOverride(cfg, game.Path); ov != nil && ov.PostLaunchText != "" {
-		delay := time.Duration(ov.DelayMs) * time.Millisecond
-		if delay == 0 {
-			delay = 6 * time.Second
-		}
-		go func() {
-			time.Sleep(delay)
-			log.Printf("[misterclaw] typing post-launch text for %s", game.Name)
-			if err := TypeText(ov.PostLaunchText); err != nil {
-				log.Printf("[misterclaw] post-launch type failed: %v", err)
-				return
+	// Format-specific post-launch actions
+	if ov := getFormatOverride(cfg, game.Path); ov != nil {
+		hasAction := len(ov.PostLaunchCombo) > 0 || ov.PostLaunchText != "" || len(ov.PostLaunchKeys) > 0
+		if hasAction {
+			delay := time.Duration(ov.DelayMs) * time.Millisecond
+			if delay == 0 {
+				delay = 6 * time.Second
 			}
-			if ov.PostLaunchRun {
-				// Wait for the program to load before typing RUN
-				time.Sleep(10 * time.Second)
-				log.Printf("[misterclaw] typing RUN for %s", game.Name)
-				if err := TypeText("run\n"); err != nil {
-					log.Printf("[misterclaw] post-launch RUN failed: %v", err)
+			go func() {
+				time.Sleep(delay)
+				// 1. Press combo if defined (e.g. Alt+ESC for LOAD"*"+RUN)
+				if len(ov.PostLaunchCombo) > 0 {
+					log.Printf("[misterclaw] pressing post-launch combo %v for %s", ov.PostLaunchCombo, game.Name)
+					if err := PressCombo(ov.PostLaunchCombo); err != nil {
+						log.Printf("[misterclaw] post-launch combo failed: %v", err)
+						return
+					}
 				}
-			}
-		}()
+				// 2. Type text if defined (e.g. LOAD for tape)
+				if ov.PostLaunchText != "" {
+					log.Printf("[misterclaw] typing post-launch text for %s", game.Name)
+					if err := TypeText(ov.PostLaunchText); err != nil {
+						log.Printf("[misterclaw] post-launch type failed: %v", err)
+						return
+					}
+				}
+				// 3. Type RUN if requested
+				if ov.PostLaunchRun {
+					time.Sleep(10 * time.Second)
+					log.Printf("[misterclaw] typing RUN for %s", game.Name)
+					if err := TypeText("run\n"); err != nil {
+						log.Printf("[misterclaw] post-launch RUN failed: %v", err)
+					}
+				}
+				// 4. Press individual keys if defined (e.g. PgUp for tape play)
+				if len(ov.PostLaunchKeys) > 0 {
+					time.Sleep(2 * time.Second)
+					for _, key := range ov.PostLaunchKeys {
+						log.Printf("[misterclaw] pressing post-launch key %q for %s", key, game.Name)
+						if err := PressKey(key); err != nil {
+							log.Printf("[misterclaw] post-launch key %q failed: %v", key, err)
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
+				}
+			}()
+		}
 	}
 
 	return nil
