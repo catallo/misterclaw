@@ -74,7 +74,7 @@ This table grows as testing reveals more cores that need special handling.
 | X68000 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | HDF via subdirs |
 | MSX | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | VHD-based, no individual game launch |
 | ao486 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
-| C64 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
+| C64 | ✅ | ✅ | ✅ | ✅ | ✅ | DolphinDOS 2.0 required. D64/G64/T64/D81: disk mount + Alt+ESC auto-load. PRG: direct injection. CRT: instant boot. TAP: not auto-launchable (DolphinDOS conflict). 20/20 games tested. |
 | C128 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Amiga | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
 | AtariST | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
