@@ -1,11 +1,6 @@
 {
-  "name": "misterclaw",
-  "display_name": "MiSTerClaw",
-  "description": "MCP remote control for MiSTer-FPGA. Launch games, search ROMs, take screenshots, read/write core settings, navigate OSD menus, auto-discover 70+ retro gaming systems. Single Go binary, zero dependencies.",
-  "repository": "https://github.com/catallo/misterclaw",
-  "license": "MIT",
-  "author": "catallo",
-  "categories": ["Games & Gamification", "Home Automation & IoT", "OS Automation"],
-  "tools": 17,
-  "tags": ["mister", "fpga", "retro-gaming", "mcp", "go"]
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "catallo"
+  ]
 }
