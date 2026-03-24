@@ -48,7 +48,7 @@ func main() {
 	}
 
 	cmd := args[0]
-	cmdArgs := args[1:]
+	cmdArgs := stripGlobalFlags(args[1:])
 
 	// Resolve host via auto-discovery for commands that need a connection
 	if cmd != "help" && cmd != "discover" {
@@ -1092,6 +1092,31 @@ AGENT NOTES:
   - Screenshot returns base64 PNG to stdout without --output
   - Tailscale setup is fully automated: setup → auth URL → poll → IP returned
 `)
+}
+
+
+// stripGlobalFlags removes global flags (--json, -j, --timeout, -t) from subcommand args.
+// This handles the case where users place global flags after the subcommand name.
+func stripGlobalFlags(args []string) []string {
+	var clean []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--json" || a == "-j" {
+			jsonFlag = true
+			continue
+		}
+		if a == "--timeout" || a == "-t" {
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil {
+					timeoutFlag = n
+				}
+				i++
+			}
+			continue
+		}
+		clean = append(clean, a)
+	}
+	return clean
 }
 
 // extractFlag pulls a named flag (--name or -short) and its value from args,
