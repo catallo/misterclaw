@@ -228,7 +228,7 @@ func toolsList() []ToolDef {
 		},
 		{
 			Name:        "mister_input",
-			Description: "Send input to MiSTer-FPGA via virtual keyboard. Use 'key' for named keyboard keys (osd, menu, confirm, up, down, left, right, coin, start). Use 'raw' for Linux keycodes. Use 'combo' for key combinations (e.g. ['leftalt', 'f12']).",
+			Description: "Send input to MiSTer-FPGA via virtual keyboard. Use 'key' for named keyboard keys (osd, menu, confirm, up, down, left, right, coin, start). Use 'raw' for Linux keycodes. Use 'combo' for key combinations (e.g. ['leftalt', 'f12']). Use 'text' to type a string character by character with correct keycodes and shift handling (e.g. 'LOAD\"*\",8,1\\n').",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -237,6 +237,7 @@ func toolsList() []ToolDef {
 					"combo":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Key combination to press (e.g. ['leftalt', 'f12'])"},
 					"button": map[string]interface{}{"type": "string", "description": "Gamepad button to press (a, b, x, y, start, select, l, r, coin)"},
 					"dpad":   map[string]interface{}{"type": "string", "description": "Gamepad d-pad direction (up, down, left, right)"},
+					"text":   map[string]interface{}{"type": "string", "description": "Text string to type character by character with automatic shift handling (e.g. 'LOAD\"*\",8,1\\n'). Supports full US keyboard layout."},
 				},
 			},
 		},
@@ -405,7 +406,9 @@ func callTool(params json.RawMessage) MCPToolResult {
 
 	case "mister_input":
 		req := map[string]interface{}{"mister": "input"}
-		if v, ok := args["button"].(string); ok && v != "" {
+		if v, ok := args["text"].(string); ok && v != "" {
+			req["text"] = v
+		} else if v, ok := args["button"].(string); ok && v != "" {
 			req["button"] = v
 		} else if v, ok := args["dpad"].(string); ok && v != "" {
 			req["dpad"] = v
@@ -420,7 +423,7 @@ func callTool(params json.RawMessage) MCPToolResult {
 			}
 			req["combo"] = combo
 		} else {
-			return errorResult("one of key, raw, combo, button, or dpad is required")
+			return errorResult("one of key, raw, combo, button, dpad, or text is required")
 		}
 		return doMisterCommand(req, formatInput)
 

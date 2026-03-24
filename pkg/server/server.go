@@ -52,6 +52,7 @@ type Request struct {
 	Device   string   `json:"device,omitempty"`
 	Button   string   `json:"button,omitempty"`
 	DPad     string   `json:"dpad,omitempty"`
+	Text     string   `json:"text,omitempty"`
 
 	// OSD navigation
 	Target string `json:"target,omitempty"`
@@ -523,9 +524,23 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 				"success": true,
 				"combo":   req.Combo,
 			})
+		case req.Text != "":
+			if err := mister.TypeText(req.Text); err != nil {
+				send(map[string]interface{}{
+					"mister":  "input",
+					"success": false,
+					"error":   err.Error(),
+				})
+				return
+			}
+			send(map[string]interface{}{
+				"mister":  "input",
+				"success": true,
+				"text":    req.Text,
+			})
 		default:
 			send(map[string]interface{}{
-				"error": "input requires key, raw, combo, button, or dpad parameter",
+				"error": "input requires key, raw, combo, button, dpad, or text parameter",
 			})
 		}
 

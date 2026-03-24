@@ -596,6 +596,126 @@ func pressCombo(codes []int) error {
 	return nil
 }
 
+// charKeyMapping holds the keycode and whether shift is needed for a character.
+type charKeyMapping struct {
+	code      int
+	needShift bool
+}
+
+// charToKey maps runes to their Linux uinput keycode and shift state (US keyboard layout).
+var charToKey = map[rune]charKeyMapping{
+	// Letters (unshifted = lowercase)
+	'a': {uinput.KeyA, false}, 'b': {uinput.KeyB, false}, 'c': {uinput.KeyC, false},
+	'd': {uinput.KeyD, false}, 'e': {uinput.KeyE, false}, 'f': {uinput.KeyF, false},
+	'g': {uinput.KeyG, false}, 'h': {uinput.KeyH, false}, 'i': {uinput.KeyI, false},
+	'j': {uinput.KeyJ, false}, 'k': {uinput.KeyK, false}, 'l': {uinput.KeyL, false},
+	'm': {uinput.KeyM, false}, 'n': {uinput.KeyN, false}, 'o': {uinput.KeyO, false},
+	'p': {uinput.KeyP, false}, 'q': {uinput.KeyQ, false}, 'r': {uinput.KeyR, false},
+	's': {uinput.KeyS, false}, 't': {uinput.KeyT, false}, 'u': {uinput.KeyU, false},
+	'v': {uinput.KeyV, false}, 'w': {uinput.KeyW, false}, 'x': {uinput.KeyX, false},
+	'y': {uinput.KeyY, false}, 'z': {uinput.KeyZ, false},
+
+	// Letters (shifted = uppercase)
+	'A': {uinput.KeyA, true}, 'B': {uinput.KeyB, true}, 'C': {uinput.KeyC, true},
+	'D': {uinput.KeyD, true}, 'E': {uinput.KeyE, true}, 'F': {uinput.KeyF, true},
+	'G': {uinput.KeyG, true}, 'H': {uinput.KeyH, true}, 'I': {uinput.KeyI, true},
+	'J': {uinput.KeyJ, true}, 'K': {uinput.KeyK, true}, 'L': {uinput.KeyL, true},
+	'M': {uinput.KeyM, true}, 'N': {uinput.KeyN, true}, 'O': {uinput.KeyO, true},
+	'P': {uinput.KeyP, true}, 'Q': {uinput.KeyQ, true}, 'R': {uinput.KeyR, true},
+	'S': {uinput.KeyS, true}, 'T': {uinput.KeyT, true}, 'U': {uinput.KeyU, true},
+	'V': {uinput.KeyV, true}, 'W': {uinput.KeyW, true}, 'X': {uinput.KeyX, true},
+	'Y': {uinput.KeyY, true}, 'Z': {uinput.KeyZ, true},
+
+	// Numbers (unshifted)
+	'1': {uinput.Key1, false}, '2': {uinput.Key2, false}, '3': {uinput.Key3, false},
+	'4': {uinput.Key4, false}, '5': {uinput.Key5, false}, '6': {uinput.Key6, false},
+	'7': {uinput.Key7, false}, '8': {uinput.Key8, false}, '9': {uinput.Key9, false},
+	'0': {uinput.Key0, false},
+
+	// Shifted number row symbols
+	'!': {uinput.Key1, true}, '@': {uinput.Key2, true}, '#': {uinput.Key3, true},
+	'$': {uinput.Key4, true}, '%': {uinput.Key5, true}, '^': {uinput.Key6, true},
+	'&': {uinput.Key7, true}, '*': {uinput.Key8, true}, '(': {uinput.Key9, true},
+	')': {uinput.Key0, true},
+
+	// Punctuation (unshifted)
+	'-':  {uinput.KeyMinus, false},
+	'=':  {uinput.KeyEqual, false},
+	'[':  {uinput.KeyLeftbrace, false},
+	']':  {uinput.KeyRightbrace, false},
+	';':  {uinput.KeySemicolon, false},
+	'\'': {uinput.KeyApostrophe, false},
+	'`':  {uinput.KeyGrave, false},
+	'\\': {uinput.KeyBackslash, false},
+	',':  {uinput.KeyComma, false},
+	'.':  {uinput.KeyDot, false},
+	'/':  {uinput.KeySlash, false},
+	' ':  {uinput.KeySpace, false},
+
+	// Shifted punctuation
+	'_':  {uinput.KeyMinus, true},
+	'+':  {uinput.KeyEqual, true},
+	'{':  {uinput.KeyLeftbrace, true},
+	'}':  {uinput.KeyRightbrace, true},
+	':':  {uinput.KeySemicolon, true},
+	'"':  {uinput.KeyApostrophe, true},
+	'~':  {uinput.KeyGrave, true},
+	'|':  {uinput.KeyBackslash, true},
+	'<':  {uinput.KeyComma, true},
+	'>':  {uinput.KeyDot, true},
+	'?':  {uinput.KeySlash, true},
+
+	// Special keys
+	'\n': {uinput.KeyEnter, false},
+	'\t': {uinput.KeyTab, false},
+}
+
+// TypeText types a string character by character using the virtual keyboard.
+// Each character is mapped to the correct keycode with shift handling.
+func TypeText(text string) error {
+	kb, err := getKeyboard()
+	if err != nil {
+		return err
+	}
+
+	for _, ch := range text {
+		mapping, ok := charToKey[ch]
+		if !ok {
+			return fmt.Errorf("unsupported character: %q (U+%04X)", ch, ch)
+		}
+
+		if mapping.needShift {
+			if err := kb.KeyDown(uinput.KeyLeftshift); err != nil {
+				return fmt.Errorf("shift down for %q: %w", ch, err)
+			}
+		}
+
+		if err := kb.KeyDown(mapping.code); err != nil {
+			if mapping.needShift {
+				kb.KeyUp(uinput.KeyLeftshift)
+			}
+			return fmt.Errorf("key down for %q: %w", ch, err)
+		}
+
+		if err := kb.KeyUp(mapping.code); err != nil {
+			if mapping.needShift {
+				kb.KeyUp(uinput.KeyLeftshift)
+			}
+			return fmt.Errorf("key up for %q: %w", ch, err)
+		}
+
+		if mapping.needShift {
+			if err := kb.KeyUp(uinput.KeyLeftshift); err != nil {
+				return fmt.Errorf("shift up for %q: %w", ch, err)
+			}
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return nil
+}
+
 // OSDNavigateTo opens the OSD and navigates to a named menu item using
 // the conf_str database to calculate the correct position.
 // coreName is the core identifier (e.g. "PC88", "SNES") — date suffixes

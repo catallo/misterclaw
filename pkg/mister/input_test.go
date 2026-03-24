@@ -372,6 +372,200 @@ func (f *failingKeyboard) KeyUp(key int) error {
 
 func (f *failingKeyboard) Close() error { return nil }
 
+// --- TypeText tests ---
+
+func TestCharToKey_AllPrintableASCII(t *testing.T) {
+	// Verify all printable ASCII characters are mapped (space through ~)
+	for ch := rune(' '); ch <= '~'; ch++ {
+		if _, ok := charToKey[ch]; !ok {
+			t.Errorf("missing charToKey mapping for %q (U+%04X)", ch, ch)
+		}
+	}
+}
+
+func TestCharToKey_SpecialChars(t *testing.T) {
+	// Verify newline and tab are mapped
+	if _, ok := charToKey['\n']; !ok {
+		t.Error("missing charToKey mapping for newline")
+	}
+	if _, ok := charToKey['\t']; !ok {
+		t.Error("missing charToKey mapping for tab")
+	}
+}
+
+func TestCharToKey_ShiftCorrectness(t *testing.T) {
+	// Uppercase letters need shift
+	for ch := 'A'; ch <= 'Z'; ch++ {
+		m := charToKey[ch]
+		if !m.needShift {
+			t.Errorf("expected shift for %q", ch)
+		}
+	}
+	// Lowercase letters don't need shift
+	for ch := 'a'; ch <= 'z'; ch++ {
+		m := charToKey[ch]
+		if m.needShift {
+			t.Errorf("did not expect shift for %q", ch)
+		}
+	}
+	// Digits don't need shift
+	for ch := '0'; ch <= '9'; ch++ {
+		m := charToKey[ch]
+		if m.needShift {
+			t.Errorf("did not expect shift for %q", ch)
+		}
+	}
+	// Shifted symbols
+	shiftedSymbols := "!@#$%^&*()_+{}|:\"<>?~"
+	for _, ch := range shiftedSymbols {
+		m, ok := charToKey[ch]
+		if !ok {
+			t.Errorf("missing mapping for shifted symbol %q", ch)
+			continue
+		}
+		if !m.needShift {
+			t.Errorf("expected shift for %q", ch)
+		}
+	}
+}
+
+func TestTypeText_Simple(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	if err := TypeText("ab"); err != nil {
+		t.Fatalf("TypeText(ab): %v", err)
+	}
+
+	events := mock.getEvents()
+	// 'a': down(a), up(a); 'b': down(b), up(b) = 4 events
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events, got %d: %v", len(events), events)
+	}
+	if events[0].code != uinput.KeyA || events[0].action != "down" {
+		t.Errorf("event[0]: expected down A, got %v", events[0])
+	}
+	if events[1].code != uinput.KeyA || events[1].action != "up" {
+		t.Errorf("event[1]: expected up A, got %v", events[1])
+	}
+	if events[2].code != uinput.KeyB || events[2].action != "down" {
+		t.Errorf("event[2]: expected down B, got %v", events[2])
+	}
+}
+
+func TestTypeText_Shifted(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	if err := TypeText("A"); err != nil {
+		t.Fatalf("TypeText(A): %v", err)
+	}
+
+	events := mock.getEvents()
+	// 'A': down(shift), down(a), up(a), up(shift) = 4 events
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events, got %d: %v", len(events), events)
+	}
+	if events[0].code != uinput.KeyLeftshift || events[0].action != "down" {
+		t.Errorf("event[0]: expected down leftshift, got %v", events[0])
+	}
+	if events[1].code != uinput.KeyA || events[1].action != "down" {
+		t.Errorf("event[1]: expected down A, got %v", events[1])
+	}
+	if events[2].code != uinput.KeyA || events[2].action != "up" {
+		t.Errorf("event[2]: expected up A, got %v", events[2])
+	}
+	if events[3].code != uinput.KeyLeftshift || events[3].action != "up" {
+		t.Errorf("event[3]: expected up leftshift, got %v", events[3])
+	}
+}
+
+func TestTypeText_MixedCase(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	if err := TypeText("aB"); err != nil {
+		t.Fatalf("TypeText(aB): %v", err)
+	}
+
+	events := mock.getEvents()
+	// 'a': down(a), up(a); 'B': down(shift), down(b), up(b), up(shift) = 6 events
+	if len(events) != 6 {
+		t.Fatalf("expected 6 events, got %d: %v", len(events), events)
+	}
+}
+
+func TestTypeText_SpecialChars(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	// Test newline sends Enter
+	if err := TypeText("\n"); err != nil {
+		t.Fatalf("TypeText(newline): %v", err)
+	}
+
+	events := mock.getEvents()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d: %v", len(events), events)
+	}
+	if events[0].code != uinput.KeyEnter {
+		t.Errorf("expected Enter keycode, got %d", events[0].code)
+	}
+}
+
+func TestTypeText_ShiftedSymbol(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	// '*' = shift+8
+	if err := TypeText("*"); err != nil {
+		t.Fatalf("TypeText(*): %v", err)
+	}
+
+	events := mock.getEvents()
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events, got %d: %v", len(events), events)
+	}
+	if events[0].code != uinput.KeyLeftshift {
+		t.Errorf("expected shift down first, got code %d", events[0].code)
+	}
+	if events[1].code != uinput.Key8 {
+		t.Errorf("expected Key8, got code %d", events[1].code)
+	}
+}
+
+func TestTypeText_C64Command(t *testing.T) {
+	mock := withMockKeyboard(t)
+
+	// Simulate typing LOAD"*",8,1\n
+	if err := TypeText("LOAD\"*\",8,1\n"); err != nil {
+		t.Fatalf("TypeText(LOAD...): %v", err)
+	}
+
+	events := mock.getEvents()
+	// L(shift+l=4) O(shift+o=4) A(shift+a=4) D(shift+d=4)
+	// "(shift+'=4) *(shift+8=4) "(shift+'=4)
+	// ,(2) 8(2) ,(2) 1(2) Enter(2)
+	// = 4*4 + 3*4 + 4*2 + 2 = 16 + 12 + 8 + 2 = 38
+	expectedCount := 38
+	if len(events) != expectedCount {
+		t.Fatalf("expected %d events, got %d", expectedCount, len(events))
+	}
+}
+
+func TestTypeText_Empty(t *testing.T) {
+	withMockKeyboard(t)
+
+	// Empty string should succeed with no events
+	if err := TypeText(""); err != nil {
+		t.Fatalf("TypeText(empty): %v", err)
+	}
+}
+
+func TestTypeText_UnsupportedChar(t *testing.T) {
+	withMockKeyboard(t)
+
+	err := TypeText("hello\x01world")
+	if err == nil {
+		t.Fatal("expected error for unsupported character")
+	}
+}
+
 // --- Gamepad tests ---
 
 // mockGamepad records all gamepad events for verification.

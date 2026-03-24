@@ -618,8 +618,13 @@ func cmdInput(args []string) error {
 			return fmt.Errorf("usage: misterclaw-send input dpad <direction>\nDirections: up, down, left, right")
 		}
 		req = map[string]interface{}{"mister": "input", "dpad": modeArgs[0]}
+	case "type":
+		if len(modeArgs) == 0 {
+			return fmt.Errorf("usage: misterclaw-send input type <text>\nTypes the text string character by character using correct keycodes.\nExample: misterclaw-send input type \"LOAD\\\"*\\\",8,1\"")
+		}
+		req = map[string]interface{}{"mister": "input", "text": strings.Join(modeArgs, " ")}
 	default:
-		return fmt.Errorf("unknown input mode: %s (use: key, raw, combo, button, dpad)", mode)
+		return fmt.Errorf("unknown input mode: %s (use: key, raw, combo, button, dpad, type)", mode)
 	}
 
 	resp, err := sendRequest(req)
