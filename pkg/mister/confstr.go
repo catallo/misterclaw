@@ -214,9 +214,9 @@ func isValidCommandStart(entry string) bool {
 	case 'R':
 		return (second >= '0' && second <= '9') || second == ',' || (second >= 'A' && second <= 'V')
 	case 'H', 'h':
-		return second >= '0' && second <= '9'
+		return (second >= '0' && second <= '9') || (second >= 'A' && second <= 'V')
 	case 'D', 'd':
-		return second >= '0' && second <= '9'
+		return (second >= '0' && second <= '9') || (second >= 'A' && second <= 'V')
 	}
 	return true
 }
@@ -256,8 +256,19 @@ func parseBitRange(s string) (int, int) {
 		return 0, 0
 	}
 
-	// Parse each character as a bit number
-	// 0-9 = 0-9, A-V = 10-31
+	// New bracket syntax: [N] or [N:M] where N,M are decimal bit numbers
+	if s[0] == '[' {
+		inner := strings.TrimRight(s[1:], "]")
+		if idx := strings.Index(inner, ":"); idx >= 0 {
+			lo, _ := strconv.Atoi(inner[:idx])
+			hi, _ := strconv.Atoi(inner[idx+1:])
+			return lo, hi
+		}
+		n, _ := strconv.Atoi(inner)
+		return n, n
+	}
+
+	// Legacy per-character syntax: 0-9 = 0-9, A-V = 10-31
 	bits := make([]int, 0, len(s))
 	for _, c := range s {
 		switch {
@@ -488,15 +499,22 @@ func parseHideDisable(raw, rest, typ string, inverted bool) *MenuItem {
 		return &MenuItem{Type: actualType, Raw: raw}
 	}
 
-	// First character(s) are the bit number
+	// First character is the menumask bit index (0-9, A-V where A=10...V=31)
 	bit := 0
 	i := 0
-	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
-		i++
-	}
-	if i > 0 {
-		if b, err := strconv.Atoi(rest[:i]); err == nil {
-			bit = b
+	if i < len(rest) {
+		ch := rest[i]
+		if ch >= '0' && ch <= '9' {
+			bit = int(ch - '0')
+			i++
+			// Multi-digit decimal (legacy, e.g. D12)
+			for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+				bit = bit*10 + int(rest[i]-'0')
+				i++
+			}
+		} else if ch >= 'A' && ch <= 'V' {
+			bit = int(ch-'A') + 10
+			i++
 		}
 	}
 
@@ -702,6 +720,7 @@ func LoadConfStrDB() (*ConfStrDB, error) {
 			return nil, fmt.Errorf("parsing confstr db from disk: %w", err)
 		}
 		log.Printf("loaded confstr_db from disk (%d cores)", len(db.Cores))
+		reparseDB(&db)
 		return &db, nil
 	}
 
@@ -714,7 +733,18 @@ func LoadConfStrDB() (*ConfStrDB, error) {
 		return nil, fmt.Errorf("parsing embedded confstr db: %w", err)
 	}
 	log.Printf("loaded embedded confstr_db (%d cores)", len(db.Cores))
+	reparseDB(&db)
 	return &db, nil
+}
+
+// reparseDB re-parses all Menu items from ConfStrRaw to pick up parser improvements
+// without needing to rebuild the confstr_db.json.
+func reparseDB(db *ConfStrDB) {
+	for i := range db.Cores {
+		if db.Cores[i].ConfStrRaw != "" {
+			db.Cores[i].Menu = ParseConfStr(db.Cores[i].ConfStrRaw)
+		}
+	}
 }
 
 // GetConfStrDB returns the cached CONF_STR database, loading it on first access.
