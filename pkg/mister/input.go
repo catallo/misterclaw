@@ -466,6 +466,11 @@ var KeyNames = map[string]int{
 	"sysrq":       uinput.KeySysrq,
 
 	// Function keys
+	// Digit keys
+	"1": uinput.Key1, "2": uinput.Key2, "3": uinput.Key3,
+	"4": uinput.Key4, "5": uinput.Key5, "6": uinput.Key6,
+	"7": uinput.Key7, "8": uinput.Key8, "9": uinput.Key9, "0": uinput.Key0,
+
 	"f1":  uinput.KeyF1,
 	"f2":  uinput.KeyF2,
 	"f3":  uinput.KeyF3,
@@ -658,7 +663,7 @@ var charToKey = map[rune]charKeyMapping{
 	'{':  {uinput.KeyLeftbrace, true},
 	'}':  {uinput.KeyRightbrace, true},
 	':':  {uinput.KeySemicolon, true},
-	'"':  {uinput.KeyApostrophe, true},
+	'"':  {uinput.Key2, true},
 	'~':  {uinput.KeyGrave, true},
 	'|':  {uinput.KeyBackslash, true},
 	'<':  {uinput.KeyComma, true},
@@ -697,6 +702,8 @@ func TypeText(text string) error {
 			return fmt.Errorf("key down for %q: %w", ch, err)
 		}
 
+		time.Sleep(40 * time.Millisecond)
+
 		if err := kb.KeyUp(mapping.code); err != nil {
 			if mapping.needShift {
 				kb.KeyUp(uinput.KeyLeftshift)
@@ -710,7 +717,7 @@ func TypeText(text string) error {
 			}
 		}
 
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 
 	return nil
