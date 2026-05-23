@@ -364,6 +364,15 @@ func LaunchGame(game GameInfo) error {
 		return fmt.Errorf("ROM not found: %s", game.Path)
 	}
 
+	// Arcade MRA files: load directly (MiSTer parses <rbf> from the MRA)
+	if strings.HasSuffix(strings.ToLower(game.Path), ".mra") {
+		log.Printf("[misterclaw] launch (arcade-mra): load_core %s", game.Path)
+		if err := writeCmd("load_core " + game.Path); err != nil {
+			return fmt.Errorf("loading core: %w", err)
+		}
+		return nil
+	}
+
 	mglContent := GenerateMGL(game)
 	if mglContent == "" {
 		return fmt.Errorf("unknown system: %s", game.System)

@@ -36,6 +36,7 @@ var (
 	usbPathFormat     = "/media/usb%d"
 	consoleCoresPath  = "/media/fat/_Console"
 	computerCoresPath = "/media/fat/_Computer"
+	arcadePath        = "/media/fat/_Arcade"
 )
 
 // CacheFilePath is the path to the persistent discovery cache file.
@@ -558,6 +559,10 @@ func discoverSystemsFast() map[string]*DiscoveredSystem {
 			if !e.IsDir() {
 				continue
 			}
+			// Skip MAME ROM folder — arcade games are indexed by .mra files
+			if strings.ToLower(e.Name()) == "mame" {
+				continue
+			}
 			dirPath := filepath.Join(parent, e.Name())
 			key := strings.ToLower(e.Name())
 
@@ -603,6 +608,29 @@ func discoverSystemsFast() map[string]*DiscoveredSystem {
 	scanLocation(sdGamesPath, "sd")
 	for i := 0; i <= 7; i++ {
 		scanLocation(fmt.Sprintf(usbPathFormat, i), fmt.Sprintf("usb%d", i))
+	}
+
+	// Scan _Arcade/ for .mra files — each MRA is a game, loaded directly via load_core
+	if entries, err := os.ReadDir(arcadePath); err == nil {
+		mraCount := 0
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".mra") {
+				mraCount++
+			}
+		}
+		if mraCount > 0 {
+			systems["arcade"] = &DiscoveredSystem{
+				Name:      "Arcade",
+				HasCore:   true,
+				TotalROMs: mraCount,
+				Config: SystemConfig{
+					Extensions: []string{".mra"},
+				},
+				Folders: []SystemFolder{
+					{Path: arcadePath, Location: "sd", RomCount: mraCount},
+				},
+			}
+		}
 	}
 
 	// Match unknown systems to cores and MGL files
