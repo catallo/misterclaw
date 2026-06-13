@@ -558,6 +558,11 @@ func sendShellCommand(command string) (string, int, error) {
 		conn.SetDeadline(time.Now().Add(30 * time.Second))
 		var resp map[string]interface{}
 		if err := dec.Decode(&resp); err != nil {
+			// JSON decode failure often means binary data in output corrupted the response.
+			// Return partial output with a warning instead of failing silently.
+			if output.Len() > 0 {
+				output.WriteString("\n[warning: output may be truncated due to binary data - use hexdump for binary files]")
+			}
 			break
 		}
 		if data, ok := resp["data"].(string); ok {
@@ -622,11 +627,28 @@ func doShellCommand(command string) MCPToolResult {
 		return errorResult(err.Error())
 	}
 
-	text := output
+	// Sanitize output: strip non-printable characters to prevent JSON corruption
+	text := sanitizeShellOutput(output)
 	if exitCode != 0 {
 		text += fmt.Sprintf("\n[exit code: %d]", exitCode)
 	}
 	return textResult(text)
+}
+
+// sanitizeShellOutput removes non-printable characters that would corrupt JSON.
+// Keeps printable ASCII, tabs, newlines, and carriage returns.
+func sanitizeShellOutput(s string) string {
+	var buf strings.Builder
+	for _, r := range s {
+		if (r >= 32 && r <= 126) || r == '\t' || r == '\n' || r == '\r' {
+			buf.WriteRune(r)
+		} else if r > 127 {
+			// Allow valid UTF-8 but replace replacement char
+			buf.WriteRune(r)
+		}
+		// Drop control chars (0-31 except tab/newline/CR) and DEL (127)
+	}
+	return buf.String()
 }
 
 // Response formatters
