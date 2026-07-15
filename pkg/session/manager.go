@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	ptyPkg "github.com/catallo/misterclaw/pkg/pty"
 )
@@ -80,7 +81,25 @@ func (s *Session) Execute(shell, cmdLine string, usePty bool, outputCb ptyPkg.Ou
 			return
 		}
 
-		exitCode, _ := exec.Wait()
+		// Queue watchdog: the session queue is strictly sequential, so a
+		// command whose Wait() never returns would wedge this session's
+		// shell forever (observed in the field: killed clients + detached
+		// grandchildren). Hard-cap a single command at 10 minutes, then
+		// group-kill and move on; if Wait() still doesn't return within
+		// grace, abandon it (leak one goroutine, keep the queue alive).
+		waitCh := make(chan int, 1)
+		go func() { code, _ := exec.Wait(); waitCh <- code }()
+		var exitCode int
+		select {
+		case exitCode = <-waitCh:
+		case <-time.After(10 * time.Minute):
+			_ = exec.Kill()
+			select {
+			case exitCode = <-waitCh:
+			case <-time.After(10 * time.Second):
+				exitCode = -1
+			}
+		}
 
 		s.mu.Lock()
 		s.status = StatusIdle

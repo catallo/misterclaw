@@ -20,12 +20,14 @@ var (
 	portFlag    int
 	jsonFlag    bool
 	timeoutFlag int
+	sessionFlag string
 )
 
 func main() {
 	flag.StringVar(&hostFlag, "host", "mister-fpga", "MiSTer-FPGA host (IP or hostname)")
 	flag.StringVar(&hostFlag, "H", "mister-fpga", "MiSTer-FPGA host (shorthand)")
 	flag.IntVar(&portFlag, "port", 9900, "Port")
+	flag.StringVar(&sessionFlag, "session", "misterclaw-cli", "Session name (a fresh name gets a fresh command queue)")
 	flag.IntVar(&portFlag, "p", 9900, "Port (shorthand)")
 	flag.BoolVar(&jsonFlag, "json", false, "JSON output")
 	flag.BoolVar(&jsonFlag, "j", false, "JSON output (shorthand)")
@@ -149,7 +151,7 @@ func sendShellRequest(command string) (string, int, error) {
 
 	req := map[string]interface{}{
 		"cmd":     command,
-		"session": "misterclaw-cli",
+		"session": sessionFlag,
 		"pty":     false,
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
