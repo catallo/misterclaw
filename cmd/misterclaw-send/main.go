@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +86,10 @@ func main() {
 		err = cmdSessionStatus()
 	case "session-kill", "session-drain":
 		err = cmdSessionKill()
+	case "push":
+		err = cmdPush(cmdArgs)
+	case "pull":
+		err = cmdPull(cmdArgs)
 	case "osd-info":
 		err = cmdOSDInfo(cmdArgs)
 	case "osd-visible":
@@ -677,6 +684,192 @@ func cmdSessionKill() error {
 	}
 	fmt.Printf("session %q drained: killed running command, cancelled %d queued\n", sessionFlag, cancelled)
 	return nil
+}
+
+const transferChunk = 256 * 1024 // matches the daemon's chunk size
+
+// cmdPush uploads a local file to the MiSTer, SHA256-verified and atomically
+// renamed on the device (task #36). Chunked base64 over the line protocol.
+func cmdPush(args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: misterclaw-send push <local-file> <remote-path>")
+	}
+	local, remote := args[0], args[1]
+
+	f, err := os.Open(local)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("hashing %s: %w", local, err)
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(hostFlag, strconv.Itoa(portFlag)),
+		time.Duration(timeoutFlag)*time.Second)
+	if err != nil {
+		return fmt.Errorf("connecting: %w", err)
+	}
+	defer conn.Close()
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+	bump := func() { conn.SetDeadline(time.Now().Add(time.Duration(timeoutFlag) * time.Second)) }
+
+	bump()
+	if err := enc.Encode(map[string]interface{}{
+		"push": true, "path": remote, "size": info.Size(), "sha256": sum,
+	}); err != nil {
+		return fmt.Errorf("sending push header: %w", err)
+	}
+	var ready map[string]interface{}
+	bump()
+	if err := dec.Decode(&ready); err != nil {
+		return fmt.Errorf("push handshake: %w", err)
+	}
+	if e, ok := ready["error"].(string); ok && e != "" {
+		return fmt.Errorf("%s", e)
+	}
+
+	buf := make([]byte, transferChunk)
+	for {
+		n, rerr := f.Read(buf)
+		if n > 0 {
+			bump()
+			if err := enc.Encode(map[string]interface{}{
+				"push_data": base64.StdEncoding.EncodeToString(buf[:n]),
+			}); err != nil {
+				return fmt.Errorf("sending chunk: %w", err)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return fmt.Errorf("reading %s: %w", local, rerr)
+		}
+	}
+
+	bump()
+	if err := enc.Encode(map[string]interface{}{"push_done": true}); err != nil {
+		return fmt.Errorf("sending push_done: %w", err)
+	}
+	var resp map[string]interface{}
+	bump()
+	if err := dec.Decode(&resp); err != nil {
+		return fmt.Errorf("push result: %w", err)
+	}
+	if jsonFlag {
+		outputJSON(resp)
+	}
+	if e, ok := resp["error"].(string); ok && e != "" {
+		return fmt.Errorf("%s", e)
+	}
+	if ok, _ := resp["success"].(bool); !ok {
+		return fmt.Errorf("push failed")
+	}
+	if !jsonFlag {
+		fmt.Printf("pushed %s -> %s (%d bytes, sha256 %s verified)\n", local, remote, info.Size(), sum[:12])
+	}
+	return nil
+}
+
+// cmdPull downloads a device file to the host, SHA256-verified and atomically
+// renamed locally (task #36).
+func cmdPull(args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: misterclaw-send pull <remote-path> <local-file>")
+	}
+	remote, local := args[0], args[1]
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(hostFlag, strconv.Itoa(portFlag)),
+		time.Duration(timeoutFlag)*time.Second)
+	if err != nil {
+		return fmt.Errorf("connecting: %w", err)
+	}
+	defer conn.Close()
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+	bump := func() { conn.SetDeadline(time.Now().Add(time.Duration(timeoutFlag) * time.Second)) }
+
+	bump()
+	if err := enc.Encode(map[string]interface{}{"pull": true, "path": remote}); err != nil {
+		return fmt.Errorf("sending pull request: %w", err)
+	}
+
+	dir := filepath.Dir(local)
+	tmp, err := os.CreateTemp(dir, ".mcpull-*")
+	if err != nil {
+		return fmt.Errorf("creating temp in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	fail := func(format string, a ...interface{}) error {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf(format, a...)
+	}
+
+	h := sha256.New()
+	var total int64
+	for {
+		bump()
+		var msg map[string]interface{}
+		if err := dec.Decode(&msg); err != nil {
+			return fail("pull stream: %v", err)
+		}
+		if e, ok := msg["error"].(string); ok && e != "" {
+			return fail("%s", e)
+		}
+		if d, ok := msg["pull_data"].(string); ok {
+			raw, err := base64.StdEncoding.DecodeString(d)
+			if err != nil {
+				return fail("bad chunk: %v", err)
+			}
+			if _, err := tmp.Write(raw); err != nil {
+				return fail("writing temp: %v", err)
+			}
+			h.Write(raw)
+			total += int64(len(raw))
+			continue
+		}
+		if done, ok := msg["pull_done"].(bool); ok && done {
+			var expSize int64
+			if s, ok := msg["size"].(float64); ok {
+				expSize = int64(s)
+			}
+			expHash, _ := msg["sha256"].(string)
+			if err := tmp.Close(); err != nil {
+				return fail("closing temp: %v", err)
+			}
+			if expSize != total {
+				os.Remove(tmpName)
+				return fmt.Errorf("size mismatch: got %d, expected %d", total, expSize)
+			}
+			got := hex.EncodeToString(h.Sum(nil))
+			if expHash != "" && got != expHash {
+				os.Remove(tmpName)
+				return fmt.Errorf("sha256 mismatch: got %s, expected %s (transfer corrupted)", got, expHash)
+			}
+			if err := os.Rename(tmpName, local); err != nil {
+				os.Remove(tmpName)
+				return fmt.Errorf("rename into place: %w", err)
+			}
+			if jsonFlag {
+				outputJSON(map[string]interface{}{"pulled": remote, "to": local, "size": total, "sha256": got})
+			} else {
+				fmt.Printf("pulled %s -> %s (%d bytes, sha256 %s verified)\n", remote, local, total, got[:12])
+			}
+			return nil
+		}
+	}
 }
 
 func cmdInput(args []string) error {

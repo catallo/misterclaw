@@ -35,6 +35,15 @@ type Request struct {
 	Close *bool `json:"close,omitempty"`
 	Drain *bool `json:"drain,omitempty"` // cancel queued cmds + kill running (session-kill)
 
+	// File transfer (push = host->MiSTer, pull = MiSTer->host). Chunked
+	// base64 over this line protocol; SHA256 verified, atomic-renamed.
+	Push     *bool  `json:"push,omitempty"`      // begin push (with Path, Size, Sha256)
+	PushData string `json:"push_data,omitempty"` // one base64 chunk
+	PushDone *bool  `json:"push_done,omitempty"` // finish push: verify + rename
+	Pull     *bool  `json:"pull,omitempty"`      // pull Path to host (server streams chunks)
+	Size     int64  `json:"size,omitempty"`      // expected byte count (push)
+	Sha256   string `json:"sha256,omitempty"`    // expected hex digest (push)
+
 	// PTY resize
 	Resize *ResizeRequest `json:"resize,omitempty"`
 
@@ -133,8 +142,13 @@ func (s *Server) handleConn(conn net.Conn) {
 	usedSessions := make(map[string]struct{})
 	var usedMu sync.Mutex
 
+	// In-progress host->device push for this connection (task #36). Cleaned
+	// up on disconnect so an interrupted transfer leaves no stray temp file.
+	var push *pushState
+
 	defer func() {
 		conn.Close()
+		push.cleanup()
 		s.mu.Lock()
 		delete(s.clients, conn)
 		s.mu.Unlock()
@@ -181,6 +195,25 @@ func (s *Server) handleConn(conn net.Conn) {
 			send(map[string]interface{}{
 				"error": fmt.Sprintf("invalid JSON: %v", err),
 			})
+			continue
+		}
+
+		// File-transfer messages carry per-connection push state, so they
+		// are handled here rather than in the stateless dispatch (task #36).
+		switch {
+		case req.Push != nil && *req.Push:
+			push.cleanup() // abandon any prior incomplete push on this conn
+			push = beginPush(req, send)
+			continue
+		case req.PushData != "":
+			push.writeChunk(req.PushData)
+			continue
+		case req.PushDone != nil && *req.PushDone:
+			push.finish(send)
+			push = nil
+			continue
+		case req.Pull != nil && *req.Pull:
+			s.handlePull(req, send)
 			continue
 		}
 
