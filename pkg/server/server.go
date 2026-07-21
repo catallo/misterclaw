@@ -33,6 +33,7 @@ type Request struct {
 	List  *bool `json:"list,omitempty"`
 	Kill  *bool `json:"kill,omitempty"`
 	Close *bool `json:"close,omitempty"`
+	Drain *bool `json:"drain,omitempty"` // cancel queued cmds + kill running (session-kill)
 
 	// PTY resize
 	Resize *ResizeRequest `json:"resize,omitempty"`
@@ -125,11 +126,31 @@ func (s *Server) Close() {
 }
 
 func (s *Server) handleConn(conn net.Conn) {
+	// Track which sessions THIS connection fed commands into, so they can be
+	// drained if the client vanishes (task #18 abandoned-queue hazard: a
+	// killed/TaskStop'd client — e.g. the golden suite — used to leave its
+	// queued commands running, blanket-killing the user's live hack).
+	usedSessions := make(map[string]struct{})
+	var usedMu sync.Mutex
+
 	defer func() {
 		conn.Close()
 		s.mu.Lock()
 		delete(s.clients, conn)
 		s.mu.Unlock()
+
+		usedMu.Lock()
+		names := make([]string, 0, len(usedSessions))
+		for name := range usedSessions {
+			names = append(names, name)
+		}
+		usedMu.Unlock()
+		for _, name := range names {
+			if n := s.manager.Drain(name); n > 0 {
+				log.Printf("client %s gone: drained %d queued command(s) from session %q", conn.RemoteAddr(), n, name)
+			}
+		}
+
 		log.Printf("client disconnected: %s", conn.RemoteAddr())
 	}()
 
@@ -163,6 +184,17 @@ func (s *Server) handleConn(conn net.Conn) {
 			continue
 		}
 
+		// Remember sessions this connection ran commands in.
+		if req.Cmd != "" {
+			name := req.Session
+			if name == "" {
+				name = "default"
+			}
+			usedMu.Lock()
+			usedSessions[name] = struct{}{}
+			usedMu.Unlock()
+		}
+
 		s.dispatch(req, send)
 	}
 }
@@ -177,6 +209,9 @@ func (s *Server) dispatch(req Request, send func(interface{})) {
 
 	case req.Close != nil && *req.Close:
 		s.handleClose(req, send)
+
+	case req.Drain != nil && *req.Drain:
+		s.handleDrain(req, send)
 
 	case req.Resize != nil:
 		s.handleResize(req, send)
@@ -221,6 +256,32 @@ func (s *Server) handleClose(req Request, send func(interface{})) {
 		"close":   true,
 		"session": req.Session,
 		"success": success,
+	})
+}
+
+// handleDrain cancels a session's queued commands and kills the running one
+// (session-kill). Unlike Kill (running process only), this flushes the whole
+// backlog — the manual recovery for a runaway queue (task #18).
+func (s *Server) handleDrain(req Request, send func(interface{})) {
+	if req.Session == "" {
+		send(map[string]interface{}{"error": "drain requires session"})
+		return
+	}
+	cancelled := s.manager.Drain(req.Session)
+	if cancelled < 0 {
+		send(map[string]interface{}{
+			"drain":   true,
+			"session": req.Session,
+			"success": false,
+			"error":   fmt.Sprintf("session %q not found", req.Session),
+		})
+		return
+	}
+	send(map[string]interface{}{
+		"drain":     true,
+		"session":   req.Session,
+		"success":   true,
+		"cancelled": cancelled,
 	})
 }
 

@@ -74,6 +74,56 @@ func TestParallelSessions(t *testing.T) {
 	}
 }
 
+// TestDrainCancelsQueued is the abandoned-queue fix (task #18): a long
+// command holds the queue head while more commands pile up behind it; Drain
+// must kill the running one AND cancel every queued command (ExitCancelled)
+// so they never execute.
+func TestDrainCancelsQueued(t *testing.T) {
+	m := NewManager("/bin/sh")
+
+	codes := make(chan int, 3)
+	cb := func(code int) { codes <- code }
+
+	// Head command occupies the session; the next two queue behind it.
+	m.Execute("drain-test", "sleep 30", false, "", func([]byte) {}, cb)
+	m.Execute("drain-test", "echo two", false, "", func([]byte) {}, cb)
+	m.Execute("drain-test", "echo three", false, "", func([]byte) {}, cb)
+
+	// Wait until the head command is actually running so the other two are
+	// sitting in the queue.
+	s := m.Get("drain-test")
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && s.Info().Status != string(StatusRunning) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if s.Info().Pending < 2 {
+		t.Fatalf("expected 2 queued commands, got Pending=%d", s.Info().Pending)
+	}
+
+	if n := m.Drain("drain-test"); n < 2 {
+		t.Errorf("Drain reported %d cancelled, want >= 2", n)
+	}
+
+	got := make([]int, 0, 3)
+	for i := 0; i < 3; i++ {
+		select {
+		case c := <-codes:
+			got = append(got, c)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timeout waiting for doneCb %d/3 (got %v)", i, got)
+		}
+	}
+	nCancel := 0
+	for _, c := range got {
+		if c == ExitCancelled {
+			nCancel++
+		}
+	}
+	if nCancel != 2 {
+		t.Errorf("expected exactly 2 cancelled commands, got codes %v", got)
+	}
+}
+
 func TestList(t *testing.T) {
 	m := NewManager("/bin/sh")
 	m.GetOrCreate("alpha")

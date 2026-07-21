@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -77,6 +79,10 @@ func main() {
 		err = cmdInput(cmdArgs)
 	case "shell":
 		err = cmdShell(cmdArgs)
+	case "session-status", "sessions":
+		err = cmdSessionStatus()
+	case "session-kill", "session-drain":
+		err = cmdSessionKill()
 	case "osd-info":
 		err = cmdOSDInfo(cmdArgs)
 	case "osd-visible":
@@ -128,6 +134,15 @@ func sendRequest(req map[string]interface{}) (map[string]interface{}, error) {
 
 	var resp map[string]interface{}
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// task #18: the old "reading response: ...i/o timeout" gave no
+			// hint. A MiSTer_cmd op (screenshot/load_core/reload) hangs the
+			// daemon when the MiSTer main process is dead — point at that.
+			return nil, fmt.Errorf("no response within %ds — the server-side operation may still be "+
+				"running; a screenshot/load_core/reload hangs when the MiSTer main process is dead "+
+				"(check: misterclaw-send status)", timeoutFlag)
+		}
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
@@ -159,30 +174,48 @@ func sendShellRequest(command string) (string, int, error) {
 	}
 
 	var output strings.Builder
-	exitCode := 0
 	dec := json.NewDecoder(conn)
 
 	for {
 		conn.SetDeadline(time.Now().Add(timeout))
 		var resp map[string]interface{}
 		if err := dec.Decode(&resp); err != nil {
-			break
+			// A decode failure here is NOT a clean end of stream — the
+			// server only ends a command with a {"done":true} message
+			// (handled below, which returns). Distinguish the failure
+			// modes instead of silently returning exit 0 as before
+			// (task #18: sendShellRequest hid read-deadline aborts, so a
+			// timed-out command looked like success):
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				fmt.Fprintf(os.Stderr,
+					"misterclaw: no server output for %ds — read deadline hit.\n"+
+						"  The command is STILL RUNNING on the MiSTer in session %q.\n"+
+						"  Raise --timeout, or run: misterclaw-send session-kill --session %s\n",
+					timeoutFlag, sessionFlag, sessionFlag)
+				return output.String(), 124,
+					fmt.Errorf("read deadline exceeded after %ds (server-side command still running)", timeoutFlag)
+			}
+			if errors.Is(err, io.EOF) {
+				return output.String(), 125,
+					fmt.Errorf("connection closed before command completed (daemon crashed or session killed)")
+			}
+			return output.String(), 125, fmt.Errorf("reading command stream: %w", err)
 		}
 		if data, ok := resp["data"].(string); ok {
 			output.WriteString(data)
 		}
 		if done, ok := resp["done"].(bool); ok && done {
+			exitCode := 0
 			if code, ok := resp["exit_code"].(float64); ok {
 				exitCode = int(code)
 			}
-			break
+			return output.String(), exitCode, nil
 		}
 		if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
 			return "", 1, fmt.Errorf("%s", errMsg)
 		}
 	}
-
-	return output.String(), exitCode, nil
 }
 
 func outputJSON(resp map[string]interface{}) {
@@ -561,23 +594,88 @@ func cmdShell(args []string) error {
 	}
 
 	output, exitCode, err := sendShellRequest(command)
-	if err != nil {
-		return err
-	}
 
 	if jsonFlag {
 		resp := map[string]interface{}{
 			"output":    output,
 			"exit_code": exitCode,
 		}
+		if err != nil {
+			resp["error"] = err.Error()
+		}
 		outputJSON(resp)
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
 		return nil
 	}
 
 	fmt.Print(output)
+	if err != nil {
+		// sendShellRequest reports read-deadline aborts (124) and lost
+		// connections (125) with a distinct exit code and a stderr note
+		// (task #18); preserve that code instead of the generic 1.
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		os.Exit(1)
+	}
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
+	return nil
+}
+
+// cmdSessionStatus lists all sessions with their run state and queue depth.
+func cmdSessionStatus() error {
+	resp, err := sendRequest(map[string]interface{}{"list": true})
+	if err != nil {
+		return err
+	}
+	if jsonFlag {
+		outputJSON(resp)
+		return nil
+	}
+	sessions, _ := resp["sessions"].([]interface{})
+	if len(sessions) == 0 {
+		fmt.Println("no active sessions")
+		return nil
+	}
+	fmt.Printf("%-24s %-8s %-8s %s\n", "SESSION", "STATUS", "PENDING", "AGENT")
+	for _, si := range sessions {
+		m, _ := si.(map[string]interface{})
+		name, _ := m["name"].(string)
+		status, _ := m["status"].(string)
+		agent, _ := m["agent"].(string)
+		pending := 0
+		if p, ok := m["pending"].(float64); ok {
+			pending = int(p)
+		}
+		fmt.Printf("%-24s %-8s %-8d %s\n", name, status, pending, agent)
+	}
+	return nil
+}
+
+// cmdSessionKill flushes a session's queued commands and kills the running
+// one (the manual recovery for a runaway queue — task #18).
+func cmdSessionKill() error {
+	resp, err := sendRequest(map[string]interface{}{
+		"drain":   true,
+		"session": sessionFlag,
+	})
+	if err != nil {
+		return err
+	}
+	if jsonFlag {
+		outputJSON(resp)
+		return nil
+	}
+	cancelled := 0
+	if c, ok := resp["cancelled"].(float64); ok {
+		cancelled = int(c)
+	}
+	fmt.Printf("session %q drained: killed running command, cancelled %d queued\n", sessionFlag, cancelled)
 	return nil
 }
 

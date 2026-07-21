@@ -16,11 +16,16 @@ const (
 	StatusRunning Status = "running"
 )
 
+// ExitCancelled is the exit code reported for a queued command that was
+// cancelled by Drain (client disconnect or session-kill) before it ran.
+const ExitCancelled = -2
+
 // Info holds metadata about a session for list responses.
 type Info struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Agent  string `json:"agent,omitempty"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Agent   string `json:"agent,omitempty"`
+	Pending int    `json:"pending"` // commands queued but not yet started
 }
 
 // Session represents a named execution context with sequential command execution.
@@ -32,6 +37,7 @@ type Session struct {
 	mu       sync.Mutex
 	cmdQueue chan func()
 	done     chan struct{}
+	gen      uint64 // bumped by Drain; commands queued before the bump self-cancel
 }
 
 func newSession(name string) *Session {
@@ -60,8 +66,22 @@ func (s *Session) processQueue() {
 // Execute runs a command in this session. Commands are queued and executed sequentially.
 // The callback is called with output chunks. Returns exit code via the done callback.
 func (s *Session) Execute(shell, cmdLine string, usePty bool, outputCb ptyPkg.OutputCallback, doneCb func(int)) {
+	s.mu.Lock()
+	myGen := s.gen
+	s.mu.Unlock()
+
 	s.cmdQueue <- func() {
 		s.mu.Lock()
+		if myGen != s.gen {
+			// Queued before a Drain (client disconnect or session-kill):
+			// cancel instead of running. This is the abandoned-queue fix
+			// (task #18) — a backed-up queue of run_scene commands would
+			// otherwise keep blanket-killing the user's live hack long
+			// after the client that queued them had gone.
+			s.mu.Unlock()
+			doneCb(ExitCancelled)
+			return
+		}
 		s.status = StatusRunning
 		if usePty {
 			s.executor = ptyPkg.NewPtyExecutor()
@@ -146,6 +166,26 @@ func (s *Session) Kill() error {
 	return exec.Kill()
 }
 
+// Drain cancels every not-yet-started command in this session and kills the
+// one currently running (task #18 abandoned-queue hazard). Bumping the
+// generation makes each queued command self-cancel via the check in Execute
+// (returning ExitCancelled the moment processQueue reaches it), so a backed-up
+// queue is neutralised without draining the channel by hand; killing the
+// running executor stops a long command (e.g. a golden run_scene mid-render)
+// immediately. Returns the number of commands that were still queued.
+func (s *Session) Drain() int {
+	s.mu.Lock()
+	s.gen++
+	exec := s.executor
+	pending := len(s.cmdQueue)
+	s.mu.Unlock()
+
+	if exec != nil {
+		_ = exec.Kill()
+	}
+	return pending
+}
+
 // Close shuts down the session entirely.
 func (s *Session) Close() {
 	s.Kill()
@@ -157,9 +197,10 @@ func (s *Session) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return Info{
-		Name:   s.Name,
-		Status: string(s.status),
-		Agent:  s.Agent,
+		Name:    s.Name,
+		Status:  string(s.status),
+		Agent:   s.Agent,
+		Pending: len(s.cmdQueue),
 	}
 }
 
@@ -234,6 +275,17 @@ func (m *Manager) Kill(sessionName string) bool {
 	}
 	s.Kill()
 	return true
+}
+
+// Drain cancels a session's queued commands and kills its running one.
+// Returns the number of commands that were still queued, or -1 if the
+// session does not exist.
+func (m *Manager) Drain(sessionName string) int {
+	s := m.Get(sessionName)
+	if s == nil {
+		return -1
+	}
+	return s.Drain()
 }
 
 // Close shuts down a session and removes it.
