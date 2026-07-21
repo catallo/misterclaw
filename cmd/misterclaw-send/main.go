@@ -1,12 +1,17 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +25,14 @@ var (
 	portFlag    int
 	jsonFlag    bool
 	timeoutFlag int
+	sessionFlag string
 )
 
 func main() {
 	flag.StringVar(&hostFlag, "host", "mister-fpga", "MiSTer-FPGA host (IP or hostname)")
 	flag.StringVar(&hostFlag, "H", "mister-fpga", "MiSTer-FPGA host (shorthand)")
 	flag.IntVar(&portFlag, "port", 9900, "Port")
+	flag.StringVar(&sessionFlag, "session", "misterclaw-cli", "Session name (a fresh name gets a fresh command queue)")
 	flag.IntVar(&portFlag, "p", 9900, "Port (shorthand)")
 	flag.BoolVar(&jsonFlag, "json", false, "JSON output")
 	flag.BoolVar(&jsonFlag, "j", false, "JSON output (shorthand)")
@@ -75,6 +82,14 @@ func main() {
 		err = cmdInput(cmdArgs)
 	case "shell":
 		err = cmdShell(cmdArgs)
+	case "session-status", "sessions":
+		err = cmdSessionStatus()
+	case "session-kill", "session-drain":
+		err = cmdSessionKill()
+	case "push":
+		err = cmdPush(cmdArgs)
+	case "pull":
+		err = cmdPull(cmdArgs)
 	case "osd-info":
 		err = cmdOSDInfo(cmdArgs)
 	case "osd-visible":
@@ -126,6 +141,15 @@ func sendRequest(req map[string]interface{}) (map[string]interface{}, error) {
 
 	var resp map[string]interface{}
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// task #18: the old "reading response: ...i/o timeout" gave no
+			// hint. A MiSTer_cmd op (screenshot/load_core/reload) hangs the
+			// daemon when the MiSTer main process is dead — point at that.
+			return nil, fmt.Errorf("no response within %ds — the server-side operation may still be "+
+				"running; a screenshot/load_core/reload hangs when the MiSTer main process is dead "+
+				"(check: misterclaw-send status)", timeoutFlag)
+		}
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
@@ -149,7 +173,7 @@ func sendShellRequest(command string) (string, int, error) {
 
 	req := map[string]interface{}{
 		"cmd":     command,
-		"session": "misterclaw-cli",
+		"session": sessionFlag,
 		"pty":     false,
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
@@ -157,30 +181,48 @@ func sendShellRequest(command string) (string, int, error) {
 	}
 
 	var output strings.Builder
-	exitCode := 0
 	dec := json.NewDecoder(conn)
 
 	for {
 		conn.SetDeadline(time.Now().Add(timeout))
 		var resp map[string]interface{}
 		if err := dec.Decode(&resp); err != nil {
-			break
+			// A decode failure here is NOT a clean end of stream — the
+			// server only ends a command with a {"done":true} message
+			// (handled below, which returns). Distinguish the failure
+			// modes instead of silently returning exit 0 as before
+			// (task #18: sendShellRequest hid read-deadline aborts, so a
+			// timed-out command looked like success):
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				fmt.Fprintf(os.Stderr,
+					"misterclaw: no server output for %ds — read deadline hit.\n"+
+						"  The command is STILL RUNNING on the MiSTer in session %q.\n"+
+						"  Raise --timeout, or run: misterclaw-send session-kill --session %s\n",
+					timeoutFlag, sessionFlag, sessionFlag)
+				return output.String(), 124,
+					fmt.Errorf("read deadline exceeded after %ds (server-side command still running)", timeoutFlag)
+			}
+			if errors.Is(err, io.EOF) {
+				return output.String(), 125,
+					fmt.Errorf("connection closed before command completed (daemon crashed or session killed)")
+			}
+			return output.String(), 125, fmt.Errorf("reading command stream: %w", err)
 		}
 		if data, ok := resp["data"].(string); ok {
 			output.WriteString(data)
 		}
 		if done, ok := resp["done"].(bool); ok && done {
+			exitCode := 0
 			if code, ok := resp["exit_code"].(float64); ok {
 				exitCode = int(code)
 			}
-			break
+			return output.String(), exitCode, nil
 		}
 		if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
 			return "", 1, fmt.Errorf("%s", errMsg)
 		}
 	}
-
-	return output.String(), exitCode, nil
 }
 
 func outputJSON(resp map[string]interface{}) {
@@ -559,24 +601,275 @@ func cmdShell(args []string) error {
 	}
 
 	output, exitCode, err := sendShellRequest(command)
-	if err != nil {
-		return err
-	}
 
 	if jsonFlag {
 		resp := map[string]interface{}{
 			"output":    output,
 			"exit_code": exitCode,
 		}
+		if err != nil {
+			resp["error"] = err.Error()
+		}
 		outputJSON(resp)
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
 		return nil
 	}
 
 	fmt.Print(output)
+	if err != nil {
+		// sendShellRequest reports read-deadline aborts (124) and lost
+		// connections (125) with a distinct exit code and a stderr note
+		// (task #18); preserve that code instead of the generic 1.
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		os.Exit(1)
+	}
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
 	return nil
+}
+
+// cmdSessionStatus lists all sessions with their run state and queue depth.
+func cmdSessionStatus() error {
+	resp, err := sendRequest(map[string]interface{}{"list": true})
+	if err != nil {
+		return err
+	}
+	if jsonFlag {
+		outputJSON(resp)
+		return nil
+	}
+	sessions, _ := resp["sessions"].([]interface{})
+	if len(sessions) == 0 {
+		fmt.Println("no active sessions")
+		return nil
+	}
+	fmt.Printf("%-24s %-8s %-8s %s\n", "SESSION", "STATUS", "PENDING", "AGENT")
+	for _, si := range sessions {
+		m, _ := si.(map[string]interface{})
+		name, _ := m["name"].(string)
+		status, _ := m["status"].(string)
+		agent, _ := m["agent"].(string)
+		pending := 0
+		if p, ok := m["pending"].(float64); ok {
+			pending = int(p)
+		}
+		fmt.Printf("%-24s %-8s %-8d %s\n", name, status, pending, agent)
+	}
+	return nil
+}
+
+// cmdSessionKill flushes a session's queued commands and kills the running
+// one (the manual recovery for a runaway queue — task #18).
+func cmdSessionKill() error {
+	resp, err := sendRequest(map[string]interface{}{
+		"drain":   true,
+		"session": sessionFlag,
+	})
+	if err != nil {
+		return err
+	}
+	if jsonFlag {
+		outputJSON(resp)
+		return nil
+	}
+	cancelled := 0
+	if c, ok := resp["cancelled"].(float64); ok {
+		cancelled = int(c)
+	}
+	fmt.Printf("session %q drained: killed running command, cancelled %d queued\n", sessionFlag, cancelled)
+	return nil
+}
+
+const transferChunk = 256 * 1024 // matches the daemon's chunk size
+
+// cmdPush uploads a local file to the MiSTer, SHA256-verified and atomically
+// renamed on the device (task #36). Chunked base64 over the line protocol.
+func cmdPush(args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: misterclaw-send push <local-file> <remote-path>")
+	}
+	local, remote := args[0], args[1]
+
+	f, err := os.Open(local)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("hashing %s: %w", local, err)
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(hostFlag, strconv.Itoa(portFlag)),
+		time.Duration(timeoutFlag)*time.Second)
+	if err != nil {
+		return fmt.Errorf("connecting: %w", err)
+	}
+	defer conn.Close()
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+	bump := func() { conn.SetDeadline(time.Now().Add(time.Duration(timeoutFlag) * time.Second)) }
+
+	bump()
+	if err := enc.Encode(map[string]interface{}{
+		"push": true, "path": remote, "size": info.Size(), "sha256": sum,
+	}); err != nil {
+		return fmt.Errorf("sending push header: %w", err)
+	}
+	var ready map[string]interface{}
+	bump()
+	if err := dec.Decode(&ready); err != nil {
+		return fmt.Errorf("push handshake: %w", err)
+	}
+	if e, ok := ready["error"].(string); ok && e != "" {
+		return fmt.Errorf("%s", e)
+	}
+
+	buf := make([]byte, transferChunk)
+	for {
+		n, rerr := f.Read(buf)
+		if n > 0 {
+			bump()
+			if err := enc.Encode(map[string]interface{}{
+				"push_data": base64.StdEncoding.EncodeToString(buf[:n]),
+			}); err != nil {
+				return fmt.Errorf("sending chunk: %w", err)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return fmt.Errorf("reading %s: %w", local, rerr)
+		}
+	}
+
+	bump()
+	if err := enc.Encode(map[string]interface{}{"push_done": true}); err != nil {
+		return fmt.Errorf("sending push_done: %w", err)
+	}
+	var resp map[string]interface{}
+	bump()
+	if err := dec.Decode(&resp); err != nil {
+		return fmt.Errorf("push result: %w", err)
+	}
+	if jsonFlag {
+		outputJSON(resp)
+	}
+	if e, ok := resp["error"].(string); ok && e != "" {
+		return fmt.Errorf("%s", e)
+	}
+	if ok, _ := resp["success"].(bool); !ok {
+		return fmt.Errorf("push failed")
+	}
+	if !jsonFlag {
+		fmt.Printf("pushed %s -> %s (%d bytes, sha256 %s verified)\n", local, remote, info.Size(), sum[:12])
+	}
+	return nil
+}
+
+// cmdPull downloads a device file to the host, SHA256-verified and atomically
+// renamed locally (task #36).
+func cmdPull(args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: misterclaw-send pull <remote-path> <local-file>")
+	}
+	remote, local := args[0], args[1]
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(hostFlag, strconv.Itoa(portFlag)),
+		time.Duration(timeoutFlag)*time.Second)
+	if err != nil {
+		return fmt.Errorf("connecting: %w", err)
+	}
+	defer conn.Close()
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+	bump := func() { conn.SetDeadline(time.Now().Add(time.Duration(timeoutFlag) * time.Second)) }
+
+	bump()
+	if err := enc.Encode(map[string]interface{}{"pull": true, "path": remote}); err != nil {
+		return fmt.Errorf("sending pull request: %w", err)
+	}
+
+	dir := filepath.Dir(local)
+	tmp, err := os.CreateTemp(dir, ".mcpull-*")
+	if err != nil {
+		return fmt.Errorf("creating temp in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	fail := func(format string, a ...interface{}) error {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf(format, a...)
+	}
+
+	h := sha256.New()
+	var total int64
+	for {
+		bump()
+		var msg map[string]interface{}
+		if err := dec.Decode(&msg); err != nil {
+			return fail("pull stream: %v", err)
+		}
+		if e, ok := msg["error"].(string); ok && e != "" {
+			return fail("%s", e)
+		}
+		if d, ok := msg["pull_data"].(string); ok {
+			raw, err := base64.StdEncoding.DecodeString(d)
+			if err != nil {
+				return fail("bad chunk: %v", err)
+			}
+			if _, err := tmp.Write(raw); err != nil {
+				return fail("writing temp: %v", err)
+			}
+			h.Write(raw)
+			total += int64(len(raw))
+			continue
+		}
+		if done, ok := msg["pull_done"].(bool); ok && done {
+			var expSize int64
+			if s, ok := msg["size"].(float64); ok {
+				expSize = int64(s)
+			}
+			expHash, _ := msg["sha256"].(string)
+			if err := tmp.Close(); err != nil {
+				return fail("closing temp: %v", err)
+			}
+			if expSize != total {
+				os.Remove(tmpName)
+				return fmt.Errorf("size mismatch: got %d, expected %d", total, expSize)
+			}
+			got := hex.EncodeToString(h.Sum(nil))
+			if expHash != "" && got != expHash {
+				os.Remove(tmpName)
+				return fmt.Errorf("sha256 mismatch: got %s, expected %s (transfer corrupted)", got, expHash)
+			}
+			if err := os.Rename(tmpName, local); err != nil {
+				os.Remove(tmpName)
+				return fmt.Errorf("rename into place: %w", err)
+			}
+			if jsonFlag {
+				outputJSON(map[string]interface{}{"pulled": remote, "to": local, "size": total, "sha256": got})
+			} else {
+				fmt.Printf("pulled %s -> %s (%d bytes, sha256 %s verified)\n", remote, local, total, got[:12])
+			}
+			return nil
+		}
+	}
 }
 
 func cmdInput(args []string) error {

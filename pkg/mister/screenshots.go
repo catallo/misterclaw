@@ -78,7 +78,22 @@ func TakeScreenshotAndCapture(timeout time.Duration) (*ScreenshotResult, error) 
 		if err != nil {
 			continue
 		}
-		if newest != oldNewest {
+		if newest != oldNewest && newest != "" {
+			// Wait for file write to complete (size stabilization)
+			var lastSize int64 = -1
+			stabilizeDeadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(stabilizeDeadline) {
+				info, err := os.Stat(newest)
+				if err != nil {
+					break
+				}
+				currentSize := info.Size()
+				if currentSize == lastSize && currentSize > 0 {
+					break
+				}
+				lastSize = currentSize
+				time.Sleep(200 * time.Millisecond)
+			}
 			return readScreenshot(newest)
 		}
 	}

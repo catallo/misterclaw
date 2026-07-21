@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -96,6 +97,9 @@ func (e *PtyExecutor) Kill() error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
+	// pty.Start runs the child via Setsid, so it leads its own process
+	// group — kill the group to reap detached grandchildren too.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	return cmd.Process.Signal(syscall.SIGKILL)
 }
 
@@ -121,7 +125,7 @@ type PipeExecutor struct {
 	in     io.WriteCloser
 	mu     sync.Mutex
 	waitCh chan struct{} // closed when cmd.Wait() completes
-	result int          // exit code, set before waitCh is closed
+	result int           // exit code, set before waitCh is closed
 }
 
 func NewPipeExecutor() *PipeExecutor {
@@ -135,6 +139,17 @@ func (e *PipeExecutor) Start(shell string, cmdLine string, cb OutputCallback) er
 	defer e.mu.Unlock()
 
 	e.cmd = exec.Command(shell, "-c", cmdLine)
+	// Own process group: lets Kill() take out detached grandchildren
+	// (setsid/nohup'd) that would otherwise survive and hold the output
+	// pipe open forever.
+	e.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// THE wedge fix: cmd.Wait() normally blocks until the stdout/stderr
+	// copy goroutines hit EOF. A detached grandchild inheriting the pipe
+	// prevents EOF permanently, wedging the session queue behind this
+	// command for good (the daemon then ignores every later shell request
+	// while status/screenshot still work). WaitDelay bounds that wait:
+	// once the direct child exits, the pipes are force-closed after 5s.
+	e.cmd.WaitDelay = 5 * time.Second
 
 	stdin, err := e.cmd.StdinPipe()
 	if err != nil {
@@ -203,6 +218,9 @@ func (e *PipeExecutor) Kill() error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
+	// Kill the whole process group (Setpgid in Start makes the shell the
+	// group leader), then the direct child as belt-and-braces.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	return cmd.Process.Signal(syscall.SIGKILL)
 }
 
