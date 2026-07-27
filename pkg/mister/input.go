@@ -30,15 +30,31 @@ var gamepadCreator = func() (GamepadDevice, error) {
 }
 
 var (
-	gpMu   sync.Mutex
-	gpInst GamepadDevice
+	gpMu      sync.Mutex
+	gpInst    GamepadDevice
+	gpLastUse time.Time
 )
+
+// inputStaleAfter is how long a shared uinput device may sit unused
+// before it is recreated on next use. If MiSTer main stops reading the
+// device (core load, input re-init), events written meanwhile pile up
+// UNDELIVERED in the kernel's evdev queue and are replayed wholesale
+// when main re-opens it — keys injected minutes ago then fire as
+// phantom input (pRDP task #42/#47: stale zap keys switching hacks
+// long after the client got its OK). Destroying and recreating the
+// device drops that queue and forces a fresh registration.
+var inputStaleAfter = 2 * time.Minute
 
 // getGamepad returns the lazily-created shared gamepad instance.
 func getGamepad() (GamepadDevice, error) {
 	gpMu.Lock()
 	defer gpMu.Unlock()
+	if gpInst != nil && time.Since(gpLastUse) > inputStaleAfter {
+		gpInst.Close()
+		gpInst = nil
+	}
 	if gpInst != nil {
+		gpLastUse = time.Now()
 		return gpInst, nil
 	}
 	gp, err := gamepadCreator()
@@ -46,6 +62,7 @@ func getGamepad() (GamepadDevice, error) {
 		return nil, fmt.Errorf("creating gamepad device: %w", err)
 	}
 	gpInst = gp
+	gpLastUse = time.Now()
 	// MiSTer needs time to register the new input device
 	time.Sleep(200 * time.Millisecond)
 	return gpInst, nil
@@ -143,11 +160,11 @@ func GamepadDPad(direction string) error {
 
 // uinput ioctl constants (from linux/uinput.h).
 const (
-	uiDevCreate = 0x5501
+	uiDevCreate  = 0x5501
 	uiDevDestroy = 0x5502
-	uiSetEvBit  = 0x40045564
-	uiSetKeyBit = 0x40045565
-	uiSetAbsBit = 0x40045567
+	uiSetEvBit   = 0x40045564
+	uiSetKeyBit  = 0x40045565
+	uiSetAbsBit  = 0x40045567
 
 	evSyn = 0x00
 	evKey = 0x01
@@ -387,15 +404,23 @@ var keyboardCreator = func() (KeyboardDevice, error) {
 }
 
 var (
-	kbMu   sync.Mutex
-	kbInst KeyboardDevice
+	kbMu      sync.Mutex
+	kbInst    KeyboardDevice
+	kbLastUse time.Time
 )
 
 // getKeyboard returns the lazily-created shared keyboard instance.
+// Idle instances are recreated (see inputStaleAfter) so undelivered
+// events queued in the kernel cannot replay as phantom keys later.
 func getKeyboard() (KeyboardDevice, error) {
 	kbMu.Lock()
 	defer kbMu.Unlock()
+	if kbInst != nil && time.Since(kbLastUse) > inputStaleAfter {
+		kbInst.Close()
+		kbInst = nil
+	}
 	if kbInst != nil {
+		kbLastUse = time.Now()
 		return kbInst, nil
 	}
 	kb, err := keyboardCreator()
@@ -403,6 +428,7 @@ func getKeyboard() (KeyboardDevice, error) {
 		return nil, fmt.Errorf("creating keyboard device: %w", err)
 	}
 	kbInst = kb
+	kbLastUse = time.Now()
 	// MiSTer needs time to register the new input device
 	time.Sleep(200 * time.Millisecond)
 	return kbInst, nil
@@ -450,20 +476,20 @@ var KeyNames = map[string]int{
 	"volume_mute": uinput.KeyMute,
 
 	// Standard key names (for use in combos and raw access)
-	"esc":         uinput.KeyEsc,
-	"enter":       uinput.KeyEnter,
-	"space":       uinput.KeySpace,
-	"tab":         uinput.KeyTab,
-	"backspace":   uinput.KeyBackspace,
-	"delete":      uinput.KeyDelete,
-	"insert":      uinput.KeyInsert,
-	"home":        uinput.KeyHome,
-	"end":         uinput.KeyEnd,
-	"pageup":      uinput.KeyPageup,
-	"pagedown":    uinput.KeyPagedown,
-	"scrolllock":  uinput.KeyScrolllock,
-	"pause":       uinput.KeyPause,
-	"sysrq":       uinput.KeySysrq,
+	"esc":        uinput.KeyEsc,
+	"enter":      uinput.KeyEnter,
+	"space":      uinput.KeySpace,
+	"tab":        uinput.KeyTab,
+	"backspace":  uinput.KeyBackspace,
+	"delete":     uinput.KeyDelete,
+	"insert":     uinput.KeyInsert,
+	"home":       uinput.KeyHome,
+	"end":        uinput.KeyEnd,
+	"pageup":     uinput.KeyPageup,
+	"pagedown":   uinput.KeyPagedown,
+	"scrolllock": uinput.KeyScrolllock,
+	"pause":      uinput.KeyPause,
+	"sysrq":      uinput.KeySysrq,
 
 	// Function keys
 	// Digit keys
@@ -658,17 +684,17 @@ var charToKey = map[rune]charKeyMapping{
 	' ':  {uinput.KeySpace, false},
 
 	// Shifted punctuation
-	'_':  {uinput.KeyMinus, true},
-	'+':  {uinput.KeyEqual, true},
-	'{':  {uinput.KeyLeftbrace, true},
-	'}':  {uinput.KeyRightbrace, true},
-	':':  {uinput.KeySemicolon, true},
-	'"':  {uinput.Key2, true},
-	'~':  {uinput.KeyGrave, true},
-	'|':  {uinput.KeyBackslash, true},
-	'<':  {uinput.KeyComma, true},
-	'>':  {uinput.KeyDot, true},
-	'?':  {uinput.KeySlash, true},
+	'_': {uinput.KeyMinus, true},
+	'+': {uinput.KeyEqual, true},
+	'{': {uinput.KeyLeftbrace, true},
+	'}': {uinput.KeyRightbrace, true},
+	':': {uinput.KeySemicolon, true},
+	'"': {uinput.Key2, true},
+	'~': {uinput.KeyGrave, true},
+	'|': {uinput.KeyBackslash, true},
+	'<': {uinput.KeyComma, true},
+	'>': {uinput.KeyDot, true},
+	'?': {uinput.KeySlash, true},
 
 	// Special keys
 	'\n': {uinput.KeyEnter, false},
@@ -745,7 +771,9 @@ func OSDNavigateTo(coreName, target string) error {
 	// Ensure OSD is closed first, then open it.
 	// If OSD was already open (e.g. from a previous navigate), F12 would close it.
 	// Escape closes the OSD if open, does nothing if closed.
-	PressKey("Escape")
+	// (Was PressKey("Escape") — that name is not in KeyNames, so the
+	// close-first step silently never happened.)
+	PressKey("esc")
 	time.Sleep(200 * time.Millisecond)
 
 	// Open OSD

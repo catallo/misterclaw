@@ -11,18 +11,27 @@ import (
 
 const screenshotDir = "/media/fat/screenshots"
 
+var (
+	screenshotRootDir           = screenshotDir
+	triggerScreenshot           = TakeScreenshot
+	prdpActive                  = PRDPCoreRunning
+	screenshotPollInterval      = 300 * time.Millisecond
+	screenshotStabilizeInterval = 200 * time.Millisecond
+	screenshotStabilizeTimeout  = 3 * time.Second
+)
+
 // ScreenshotResult holds screenshot data.
 type ScreenshotResult struct {
-	Data     string `json:"data"`     // base64-encoded PNG
-	Path     string `json:"path"`     // file path on MiSTer
-	CoreName string `json:"core"`     // core subfolder name
-	FileName string `json:"filename"` // screenshot filename
-	SizeBytes int   `json:"size"`     // file size
+	Data      string `json:"data"`     // base64-encoded PNG
+	Path      string `json:"path"`     // file path on MiSTer
+	CoreName  string `json:"core"`     // core subfolder name
+	FileName  string `json:"filename"` // screenshot filename
+	SizeBytes int    `json:"size"`     // file size
 }
 
 // latestScreenshot finds the most recent screenshot file across all core subdirs.
 func latestScreenshot() (string, error) {
-	entries, err := os.ReadDir(screenshotDir)
+	entries, err := os.ReadDir(screenshotRootDir)
 	if err != nil {
 		return "", fmt.Errorf("reading screenshot dir: %w", err)
 	}
@@ -34,7 +43,7 @@ func latestScreenshot() (string, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		subdir := filepath.Join(screenshotDir, entry.Name())
+		subdir := filepath.Join(screenshotRootDir, entry.Name())
 		files, err := os.ReadDir(subdir)
 		if err != nil {
 			continue
@@ -62,37 +71,31 @@ func latestScreenshot() (string, error) {
 
 // TakeScreenshotAndCapture triggers a screenshot and returns the result as base64.
 func TakeScreenshotAndCapture(timeout time.Duration) (*ScreenshotResult, error) {
+	// The pRDP core needs its own capture path: MiSTer main's screenshot
+	// grabs black frames there, the real image lives in DDR3 (prdp.go).
+	if prdpActive() {
+		return capturePRDPScreenshot()
+	}
+
 	// Remember the current newest screenshot
 	oldNewest, _ := latestScreenshot()
 
 	// Trigger screenshot via MiSTer_cmd
-	if err := TakeScreenshot(); err != nil {
+	if err := triggerScreenshot(); err != nil {
 		return nil, fmt.Errorf("triggering screenshot: %w", err)
 	}
 
 	// Poll for new file
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(screenshotPollInterval)
 		newest, err := latestScreenshot()
 		if err != nil {
 			continue
 		}
 		if newest != oldNewest && newest != "" {
-			// Wait for file write to complete (size stabilization)
-			var lastSize int64 = -1
-			stabilizeDeadline := time.Now().Add(3 * time.Second)
-			for time.Now().Before(stabilizeDeadline) {
-				info, err := os.Stat(newest)
-				if err != nil {
-					break
-				}
-				currentSize := info.Size()
-				if currentSize == lastSize && currentSize > 0 {
-					break
-				}
-				lastSize = currentSize
-				time.Sleep(200 * time.Millisecond)
+			if err := waitForStableFileSize(newest, screenshotStabilizeTimeout); err != nil {
+				return nil, err
 			}
 			return readScreenshot(newest)
 		}
@@ -105,7 +108,7 @@ func TakeScreenshotAndCapture(timeout time.Duration) (*ScreenshotResult, error) 
 func ListScreenshots() ([]ScreenshotResult, error) {
 	var results []ScreenshotResult
 
-	entries, err := os.ReadDir(screenshotDir)
+	entries, err := os.ReadDir(screenshotRootDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return results, nil
@@ -118,7 +121,7 @@ func ListScreenshots() ([]ScreenshotResult, error) {
 			continue
 		}
 		coreName := entry.Name()
-		subdir := filepath.Join(screenshotDir, coreName)
+		subdir := filepath.Join(screenshotRootDir, coreName)
 		files, err := os.ReadDir(subdir)
 		if err != nil {
 			continue
@@ -132,9 +135,9 @@ func ListScreenshots() ([]ScreenshotResult, error) {
 				continue
 			}
 			results = append(results, ScreenshotResult{
-				Path:     filepath.Join(subdir, f.Name()),
-				CoreName: coreName,
-				FileName: f.Name(),
+				Path:      filepath.Join(subdir, f.Name()),
+				CoreName:  coreName,
+				FileName:  f.Name(),
 				SizeBytes: int(info.Size()),
 			})
 		}
@@ -148,6 +151,36 @@ func ListScreenshots() ([]ScreenshotResult, error) {
 	return results, nil
 }
 
+func waitForStableFileSize(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	lastSize := int64(-1)
+	stableChecks := 0
+
+	for {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("stat screenshot: %w", err)
+		}
+
+		size := info.Size()
+		if size == lastSize {
+			stableChecks++
+			if stableChecks >= 2 {
+				return nil
+			}
+		} else {
+			lastSize = size
+			stableChecks = 0
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("screenshot file did not stabilize within %s", timeout)
+		}
+
+		time.Sleep(screenshotStabilizeInterval)
+	}
+}
+
 func readScreenshot(path string) (*ScreenshotResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -158,10 +191,10 @@ func readScreenshot(path string) (*ScreenshotResult, error) {
 	coreName := filepath.Base(dir)
 
 	return &ScreenshotResult{
-		Data:     base64.StdEncoding.EncodeToString(data),
-		Path:     path,
-		CoreName: coreName,
-		FileName: filepath.Base(path),
+		Data:      base64.StdEncoding.EncodeToString(data),
+		Path:      path,
+		CoreName:  coreName,
+		FileName:  filepath.Base(path),
 		SizeBytes: len(data),
 	}, nil
 }

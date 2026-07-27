@@ -601,14 +601,14 @@ func TestIsOSDTopLevelItem(t *testing.T) {
 		{"option", 0, true},
 		{"trigger", 0, true},
 		{"reset", 0, true},
-		{"separator", 0, true},
+		{"separator", 0, false}, // cursor skips separators
 		{"mount", 0, true},
 		{"file_load", 0, true},
 		{"file_load_core", 0, true},
 		{"cheat", 0, true},
 		{"dip", 0, true},
-		{"sub_page", 1, true},  // page entries are navigable in top-level
-		{"option", 1, false},   // items ON a sub-page are not top-level
+		{"sub_page", 1, true}, // page entries are navigable in top-level
+		{"option", 1, false},  // items ON a sub-page are not top-level
 		{"trigger", 1, false},
 		{"separator", 1, false},
 		{"label", 0, false},
@@ -642,13 +642,13 @@ func TestFindOSDItemPosition_PC8801(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Visible top-level items:
-	// sep(0) Aspect(1) Scale(2) Scandoubler(3) sep(4) Mode(5) Speed(6)
-	// sep(7) FDD0(8) FDD1(9) SYNC_FD0(10) SYNC_FD1(11)
-	// sep(12) Basic(13) Cols(14) Lines(15) Disk_boot(16)
-	// sep(17) Input(18) SoundBoard2(19) sep(20) Reset(21)
-	if loc.Position != 21 {
-		t.Errorf("PC8801 Reset: expected position 21, got %d", loc.Position)
+	// Selectable top-level items (the OSD cursor skips separators):
+	// Aspect(0) Scale(1) Scandoubler(2) Mode(3) Speed(4)
+	// FDD0(5) FDD1(6) SYNC_FD0(7) SYNC_FD1(8)
+	// Basic(9) Cols(10) Lines(11) Disk_boot(12)
+	// Input(13) SoundBoard2(14) Reset(15)
+	if loc.Position != 15 {
+		t.Errorf("PC8801 Reset: expected position 15, got %d", loc.Position)
 	}
 	if loc.OnSubPage {
 		t.Error("PC8801 Reset should not be on a sub-page")
@@ -659,8 +659,8 @@ func TestFindOSDItemPosition_PC8801(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loc.Position != 8 {
-		t.Errorf("PC8801 FDD0: expected position 8, got %d", loc.Position)
+	if loc.Position != 5 {
+		t.Errorf("PC8801 FDD0: expected position 5, got %d", loc.Position)
 	}
 }
 
@@ -672,14 +672,14 @@ func TestFindOSDItemPosition_SimpleCore(t *testing.T) {
 		},
 	}
 
-	// Visible: file_load(0), sep(1), option(2), trigger"Reset"(3), reset"Reset"(4)
+	// Selectable: file_load(0), option(1), trigger"Reset"(2), reset"Reset"(3)
 	loc, err := FindOSDItemPosition(db, "MYCORE", "Reset", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// First "Reset" match is the trigger at position 3
-	if loc.Position != 3 {
-		t.Errorf("SimpleCore Reset: expected position 3, got %d", loc.Position)
+	// First "Reset" match is the trigger at position 2
+	if loc.Position != 2 {
+		t.Errorf("SimpleCore Reset: expected position 2, got %d", loc.Position)
 	}
 }
 
@@ -715,9 +715,9 @@ func TestFindOSDItemPosition_FuzzyMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fuzzy match PC88 → PC8801 failed: %v", err)
 	}
-	// sep(0), Reset(1)
-	if loc.Position != 1 {
-		t.Errorf("expected position 1, got %d", loc.Position)
+	// Reset(0) — the leading separator is skipped by the cursor
+	if loc.Position != 0 {
+		t.Errorf("expected position 0, got %d", loc.Position)
 	}
 }
 
@@ -730,13 +730,13 @@ func TestFindOSDItemPosition_SubPage(t *testing.T) {
 		},
 	}
 
-	// Top-level: mount(0) sep(1) Aspect(2) Video&Audio(3) sep(4) Reset(5)
+	// Top-level selectable: mount(0) Aspect(1) Video&Audio(2) Reset(3)
 	loc, err := FindOSDItemPosition(db, "TESTCORE", "Reset", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loc.Position != 5 || loc.OnSubPage {
-		t.Errorf("Reset: expected top-level position 5, got position %d onSubPage=%v", loc.Position, loc.OnSubPage)
+	if loc.Position != 3 || loc.OnSubPage {
+		t.Errorf("Reset: expected top-level position 3, got position %d onSubPage=%v", loc.Position, loc.OnSubPage)
 	}
 
 	// Sub-page item: Widescreen is on page 1, position 0
@@ -750,17 +750,18 @@ func TestFindOSDItemPosition_SubPage(t *testing.T) {
 	if loc.Position != 0 {
 		t.Errorf("Widescreen: expected sub-page position 0, got %d", loc.Position)
 	}
-	if loc.PagePosition != 3 {
-		t.Errorf("Widescreen: expected page entry at top-level position 3, got %d", loc.PagePosition)
+	if loc.PagePosition != 2 {
+		t.Errorf("Widescreen: expected page entry at top-level position 2, got %d", loc.PagePosition)
 	}
 
-	// Sub-page item: Scale is on page 1, position 3 (Widescreen(0), VCrop(1), sep(2), Scale(3))
+	// Sub-page item: Scale is on page 1, position 2 (Widescreen(0), VCrop(1),
+	// P1- separator skipped, Scale(2))
 	loc, err = FindOSDItemPosition(db, "TESTCORE", "Scale", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loc.OnSubPage || loc.Position != 3 {
-		t.Errorf("Scale: expected sub-page position 3, got position %d onSubPage=%v", loc.Position, loc.OnSubPage)
+	if !loc.OnSubPage || loc.Position != 2 {
+		t.Errorf("Scale: expected sub-page position 2, got position %d onSubPage=%v", loc.Position, loc.OnSubPage)
 	}
 }
 
@@ -790,11 +791,11 @@ func TestNormalizeCoreName(t *testing.T) {
 	tests := []struct {
 		input, want string
 	}{
-		{"PC88_20250918", "PC8801"},  // strip date + fuzzy match via rbf_name
-		{"SNES_20250605", "SNES"},    // strip date + exact match
-		{"SNES", "SNES"},             // already clean
+		{"PC88_20250918", "PC8801"},             // strip date + fuzzy match via rbf_name
+		{"SNES_20250605", "SNES"},               // strip date + exact match
+		{"SNES", "SNES"},                        // already clean
 		{"UnknownCore_20250101", "UnknownCore"}, // strip date, no DB match
-		{"Menu", "Menu"},             // no date suffix, no DB match
+		{"Menu", "Menu"},                        // no date suffix, no DB match
 	}
 	for _, tt := range tests {
 		got := NormalizeCoreName(tt.input)
