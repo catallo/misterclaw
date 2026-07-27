@@ -110,21 +110,23 @@ func TestHandleToolsList(t *testing.T) {
 	}
 
 	expectedTools := map[string]bool{
-		"mister_status":     false,
-		"mister_launch":     false,
-		"mister_search":     false,
-		"mister_systems":    false,
-		"mister_screenshot": false,
-		"mister_info":       false,
-		"mister_input":      false,
-		"mister_tailscale":  false,
-		"mister_shell":      false,
-		"mister_osd_info":   false,
-		"mister_osd_visible": false,
-		"mister_cfg_read":    false,
-		"mister_cfg_write":   false,
-		"mister_reload":      false,
-		"mister_rescan":      false,
+		"mister_status":       false,
+		"mister_launch":       false,
+		"mister_search":       false,
+		"mister_systems":      false,
+		"mister_screenshot":   false,
+		"mister_info":         false,
+		"mister_input":        false,
+		"mister_tailscale":    false,
+		"mister_shell":        false,
+		"mister_osd_info":     false,
+		"mister_osd_visible":  false,
+		"mister_cfg_read":     false,
+		"mister_cfg_write":    false,
+		"mister_reload":       false,
+		"mister_rescan":       false,
+		"mister_osd_navigate": false,
+		"mister_system_info":  false,
 	}
 
 	for _, tool := range tools {
@@ -361,7 +363,7 @@ func TestFullRoundTrip(t *testing.T) {
 	result, _ = parsed["result"].(map[string]interface{})
 
 	tools, _ := result["tools"].([]interface{})
-	if len(tools) != 15 {
-		t.Errorf("expected 15 tools, got %d", len(tools))
+	if len(tools) != 17 {
+		t.Errorf("expected 17 tools, got %d", len(tools))
 	}
 }

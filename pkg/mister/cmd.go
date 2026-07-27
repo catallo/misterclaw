@@ -73,7 +73,15 @@ func GetRunningCore() (*CoreStatus, error) {
 }
 
 // LoadCore writes a load_core command to /dev/MiSTer_cmd.
+// The shared uinput devices are recycled first: across a core load
+// MiSTer main re-enumerates input devices, and any events still queued
+// undelivered on the old virtual devices would be replayed into the
+// NEW core as phantom input when main re-opens them (pRDP task #47's
+// self-opening menu). Destroying the devices drops those queues; the
+// next input op lazily recreates them.
 func LoadCore(path string) error {
+	CloseKeyboard()
+	CloseGamepad()
 	return writeCmd("load_core " + path)
 }
 
