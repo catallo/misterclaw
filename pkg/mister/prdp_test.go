@@ -24,6 +24,10 @@ func TestPRDPCoreRunning(t *testing.T) {
 	if !PRDPCoreRunning() {
 		t.Error("CORENAME=PRDP: expected true")
 	}
+	os.WriteFile(tmp, []byte("XScreenSaver\n"), 0644)
+	if !PRDPCoreRunning() {
+		t.Error("CORENAME=XScreenSaver: expected true (product rename)")
+	}
 }
 
 func TestPRDPDecodeFrame(t *testing.T) {

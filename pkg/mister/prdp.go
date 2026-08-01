@@ -52,9 +52,15 @@ const (
 var prdpCoreNamePath = "/tmp/CORENAME"
 
 // PRDPCoreRunning reports whether the pRDP core is the active core.
+// The core's CONF_STR name changed to the product name "XScreenSaver"
+// (2026-08-01); pre-rename cores report "PRDP" — accept both.
 func PRDPCoreRunning() bool {
 	b, err := os.ReadFile(prdpCoreNamePath)
-	return err == nil && strings.TrimSpace(string(b)) == "PRDP"
+	if err != nil {
+		return false
+	}
+	name := strings.TrimSpace(string(b))
+	return name == "XScreenSaver" || name == "PRDP"
 }
 
 // prdpDecodeFrame converts a raw A1R5G5B5 framebuffer dump into an
@@ -151,8 +157,8 @@ func capturePRDPScreenshot() (*ScreenshotResult, error) {
 		return nil, fmt.Errorf("encoding PRDP png: %w", err)
 	}
 
-	dir := filepath.Join(screenshotRootDir, "PRDP")
-	fileName := time.Now().Format("20060102_150405") + "-prdp.png"
+	dir := filepath.Join(screenshotRootDir, "XScreenSaver")
+	fileName := time.Now().Format("20060102_150405") + "-xscreensaver.png"
 	path := filepath.Join(dir, fileName)
 	// Best effort: the capture is still returned if the SD write fails.
 	if err := os.MkdirAll(dir, 0o755); err == nil {
@@ -162,7 +168,7 @@ func capturePRDPScreenshot() (*ScreenshotResult, error) {
 	return &ScreenshotResult{
 		Data:      base64.StdEncoding.EncodeToString(buf.Bytes()),
 		Path:      path,
-		CoreName:  "PRDP",
+		CoreName:  "XScreenSaver",
 		FileName:  fileName,
 		SizeBytes: buf.Len(),
 	}, nil
