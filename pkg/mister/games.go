@@ -2,26 +2,26 @@ package mister
 
 import (
 	"encoding/xml"
-	"log"
 	"fmt"
+	"log"
 	"os"
-	"time"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // PostLaunchConfig defines actions to perform after launching a game.
 type PostLaunchConfig struct {
 	OSDReset bool   `json:"osd_reset"`          // perform OSD Reset after launch (floppy-disk cores)
-	DelayMs  int    `json:"delay_ms,omitempty"`  // delay before post-launch actions (ms)
-	Notes    string `json:"notes,omitempty"`     // usage notes for this system
+	DelayMs  int    `json:"delay_ms,omitempty"` // delay before post-launch actions (ms)
+	Notes    string `json:"notes,omitempty"`    // usage notes for this system
 }
 
 // FormatOverride allows different MGL parameters based on file extension.
 type FormatOverride struct {
-	Type           string   `json:"type"`            // "f" or "s"
-	Index          int      `json:"index"`
-	Extensions     []string `json:"extensions"`      // which extensions trigger this override
+	Type            string   `json:"type"` // "f" or "s"
+	Index           int      `json:"index"`
+	Extensions      []string `json:"extensions"`                  // which extensions trigger this override
 	PostLaunchText  string   `json:"post_launch_text,omitempty"`  // text to type after launch (e.g. LOAD command)
 	PostLaunchRun   bool     `json:"post_launch_run,omitempty"`   // type RUN after PostLaunchText
 	PostLaunchCombo []string `json:"post_launch_combo,omitempty"` // key combo to press after launch (e.g. ["leftalt","esc"])
@@ -31,12 +31,12 @@ type FormatOverride struct {
 
 // SystemConfig defines how to launch games for a given system.
 type SystemConfig struct {
-	Core       string           `json:"core"`
-	Delay      int              `json:"delay"`
-	Type       string           `json:"type"`       // "f" or "s"
-	Index      int              `json:"index"`
-	Extensions []string         `json:"extensions"`
-	SetName    string           `json:"set_name,omitempty"`    // optional, for systems sharing a core (GBC, GameGear, etc.)
+	Core            string            `json:"core"`
+	Delay           int               `json:"delay"`
+	Type            string            `json:"type"` // "f" or "s"
+	Index           int               `json:"index"`
+	Extensions      []string          `json:"extensions"`
+	SetName         string            `json:"set_name,omitempty"`         // optional, for systems sharing a core (GBC, GameGear, etc.)
 	PostLaunch      *PostLaunchConfig `json:"post_launch,omitempty"`      // post-launch actions (OSD reset, notes)
 	FormatOverrides []FormatOverride  `json:"format_overrides,omitempty"` // extension-based MGL parameter overrides
 }
@@ -97,37 +97,36 @@ var systemDefaults = map[string]SystemConfig{
 	"SG1000":          {Core: "_Console/ColecoVision", Delay: 1, Type: "f", Index: 1, Extensions: []string{".sg"}},
 
 	// === Computers ===
-	"Amiga":       {Core: "_Computer/Minimig", Delay: 1, Type: "s", Index: 0, Extensions: []string{".adf", ".hdf"}},
-	"C64":         {Core: "_Computer/C64", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64", ".t64", ".g64", ".tap", ".d81"}, PostLaunch: &PostLaunchConfig{Notes: "REQUIRES DolphinDOS 2.0 — the auto-launch routines depend on DolphinDOS being active (parallel ~20x fast loading, LOAD defaults to device 8). Without DolphinDOS, Alt+ESC auto-load for disk images will NOT work. Auto-launch: D64/G64/T64/D81 are mounted as disk and auto-started via Alt+ESC (C64 built-in: LOAD\"*\"+RUN). PRG files are directly injected into RAM. CRT cartridges boot instantly. TAP (datasette) is NOT auto-launchable — DolphinDOS redirects LOAD to disk drive (device 8), bypassing tape (device 1). Joystick: most games use Port 2. Keyboard: F2/F4/F6/F8 auto-Shift, Alt/Tab=C= key, PgUp=Tape Play/Pause, F9=Arrow-up, F11=Restore."}, FormatOverrides: []FormatOverride{
+	"Amiga": {Core: "_Computer/Minimig", Delay: 1, Type: "s", Index: 0, Extensions: []string{".adf", ".hdf"}},
+	"C64": {Core: "_Computer/C64", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64", ".t64", ".g64", ".tap", ".d81"}, PostLaunch: &PostLaunchConfig{Notes: "REQUIRES DolphinDOS 2.0 — the auto-launch routines depend on DolphinDOS being active (parallel ~20x fast loading, LOAD defaults to device 8). Without DolphinDOS, Alt+ESC auto-load for disk images will NOT work. Auto-launch: D64/G64/T64/D81 are mounted as disk and auto-started via Alt+ESC (C64 built-in: LOAD\"*\"+RUN). PRG files are directly injected into RAM. CRT cartridges boot instantly. TAP (datasette) is NOT auto-launchable — DolphinDOS redirects LOAD to disk drive (device 8), bypassing tape (device 1). Joystick: most games use Port 2. Keyboard: F2/F4/F6/F8 auto-Shift, Alt/Tab=C= key, PgUp=Tape Play/Pause, F9=Arrow-up, F11=Restore."}, FormatOverrides: []FormatOverride{
 		{Type: "s", Index: 0, Extensions: []string{".d64", ".g64", ".t64", ".d81"}, PostLaunchCombo: []string{"leftalt", "esc"}, DelayMs: 8000},
 		{Type: "f", Index: 1, Extensions: []string{".tap"}, PostLaunchText: "load\n", PostLaunchKeys: []string{"pageup"}, DelayMs: 8000},
 	}},
-	"C128":        {Core: "_Computer/C128", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64"}, FormatOverrides: []FormatOverride{
+	"C128": {Core: "_Computer/C128", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64"}, FormatOverrides: []FormatOverride{
 		{Type: "s", Index: 0, Extensions: []string{".d64"}, PostLaunchCombo: []string{"leftalt", "esc"}, DelayMs: 8000},
 	}},
-	"VIC20":       {Core: "_Computer/VIC20", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64"}, FormatOverrides: []FormatOverride{
+	"VIC20": {Core: "_Computer/VIC20", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg", ".crt", ".d64"}, FormatOverrides: []FormatOverride{
 		{Type: "s", Index: 0, Extensions: []string{".d64"}, PostLaunchCombo: []string{"leftalt", "esc"}, DelayMs: 8000},
 	}},
-	"AtariST":     {Core: "_Computer/AtariST", Delay: 1, Type: "s", Index: 0, Extensions: []string{".st", ".msa", ".stx"}},
-	"MSX":         {Core: "_Computer/MSX", Delay: 1, Type: "f", Index: 1, Extensions: []string{".rom", ".mx1", ".mx2"}},
-	"ZXSpectrum":  {Core: "_Computer/ZX-Spectrum", Delay: 1, Type: "f", Index: 1, Extensions: []string{".tap", ".tzx", ".z80", ".sna"}},
-	"ZX81":        {Core: "_Computer/ZX81", Delay: 1, Type: "f", Index: 1, Extensions: []string{".p", ".0"}},
-	"Amstrad":     {Core: "_Computer/Amstrad", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".cdt"}},
-	"AmstradPCW":  {Core: "_Computer/Amstrad-PCW", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk"}},
-	"BBCMicro":    {Core: "_Computer/BBCMicro", Delay: 1, Type: "s", Index: 0, Extensions: []string{".ssd", ".dsd"}},
-	"ao486":       {Core: "_Computer/ao486", Delay: 1, Type: "s", Index: 0, Extensions: []string{".img", ".vhd"}},
-	"PCXT":        {Core: "_Computer/PCXT", Delay: 1, Type: "s", Index: 0, Extensions: []string{".img", ".vhd"}},
-	"X68000":      {Core: "_Computer/X68000", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dim", ".hdf", ".d88"}},
-	"MacPlus":     {Core: "_Computer/MacPlus", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".img"}},
-	"Archimedes":  {Core: "_Computer/Archimedes", Delay: 1, Type: "s", Index: 0, Extensions: []string{".vhd"}},
-	"AppleI":      {Core: "_Computer/Apple-I", Delay: 1, Type: "f", Index: 1, Extensions: []string{".txt"}},
-	"AppleII":     {Core: "_Computer/Apple-II", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".nib"}},
-	"SAMCoupe":    {Core: "_Computer/SAMCoupe", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".mgt"}},
-	"Altair8800":  {Core: "_Computer/Altair8800", Delay: 1, Type: "f", Index: 1, Extensions: []string{".bin"}},
-	"PDP1":        {Core: "_Computer/PDP1", Delay: 1, Type: "f", Index: 1, Extensions: []string{".bin", ".rim"}},
-	"PET":         {Core: "_Computer/PET2001", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg"}},
-	"PC8801":      {Core: "_Computer/PC88", Delay: 2, Type: "s", Index: 0, Extensions: []string{".d88"}, PostLaunch: &PostLaunchConfig{OSDReset: true, DelayMs: 4000, Notes: "STOP=End, CLR=Home, GRPH=Alt, HELP=F11. 2 FDD drives (D88)."}},
-
+	"AtariST":    {Core: "_Computer/AtariST", Delay: 1, Type: "s", Index: 0, Extensions: []string{".st", ".msa", ".stx"}},
+	"MSX":        {Core: "_Computer/MSX", Delay: 1, Type: "f", Index: 1, Extensions: []string{".rom", ".mx1", ".mx2"}},
+	"ZXSpectrum": {Core: "_Computer/ZX-Spectrum", Delay: 1, Type: "f", Index: 1, Extensions: []string{".tap", ".tzx", ".z80", ".sna"}},
+	"ZX81":       {Core: "_Computer/ZX81", Delay: 1, Type: "f", Index: 1, Extensions: []string{".p", ".0"}},
+	"Amstrad":    {Core: "_Computer/Amstrad", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".cdt"}},
+	"AmstradPCW": {Core: "_Computer/Amstrad-PCW", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk"}},
+	"BBCMicro":   {Core: "_Computer/BBCMicro", Delay: 1, Type: "s", Index: 0, Extensions: []string{".ssd", ".dsd"}},
+	"ao486":      {Core: "_Computer/ao486", Delay: 1, Type: "s", Index: 0, Extensions: []string{".img", ".vhd"}},
+	"PCXT":       {Core: "_Computer/PCXT", Delay: 1, Type: "s", Index: 0, Extensions: []string{".img", ".vhd"}},
+	"X68000":     {Core: "_Computer/X68000", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dim", ".hdf", ".d88"}},
+	"MacPlus":    {Core: "_Computer/MacPlus", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".img"}},
+	"Archimedes": {Core: "_Computer/Archimedes", Delay: 1, Type: "s", Index: 0, Extensions: []string{".vhd"}},
+	"AppleI":     {Core: "_Computer/Apple-I", Delay: 1, Type: "f", Index: 1, Extensions: []string{".txt"}},
+	"AppleII":    {Core: "_Computer/Apple-II", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".nib"}},
+	"SAMCoupe":   {Core: "_Computer/SAMCoupe", Delay: 1, Type: "s", Index: 0, Extensions: []string{".dsk", ".mgt"}},
+	"Altair8800": {Core: "_Computer/Altair8800", Delay: 1, Type: "f", Index: 1, Extensions: []string{".bin"}},
+	"PDP1":       {Core: "_Computer/PDP1", Delay: 1, Type: "f", Index: 1, Extensions: []string{".bin", ".rim"}},
+	"PET":        {Core: "_Computer/PET2001", Delay: 1, Type: "f", Index: 1, Extensions: []string{".prg"}},
+	"PC8801":     {Core: "_Computer/PC88", Delay: 2, Type: "s", Index: 0, Extensions: []string{".d88"}, PostLaunch: &PostLaunchConfig{OSDReset: true, DelayMs: 4000, Notes: "STOP=End, CLR=Home, GRPH=Alt, HELP=F11. 2 FDD drives (D88)."}},
 }
 
 // GetSystemConfig returns the config for a system name (case-insensitive).
@@ -154,6 +153,9 @@ func GetSystemConfig(system string) (SystemConfig, bool) {
 
 // scanDir walks a directory and collects ROM files matching the given extensions.
 func scanDir(dir, system, location string, extensions map[string]bool) []GameInfo {
+	if strings.EqualFold(system, "Arcade") {
+		return scanArcadeFolder(dir, system, location)
+	}
 	var games []GameInfo
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -357,11 +359,39 @@ func mglPath(corePath string) string {
 	return filepath.Join("/media/fat", parent, base+".mgl")
 }
 
-// LaunchGame writes an MGL file and tells MiSTer to load it.
+// LaunchCoreName returns the requested core for launch response metadata.
+// Arcade descriptors select their own RBF rather than a system-wide core.
+func LaunchCoreName(game GameInfo) string {
+	if strings.EqualFold(filepath.Ext(game.Path), ".mra") {
+		if mra, err := ParseMRA(game.Path); err == nil {
+			return strings.TrimSpace(mra.RBF)
+		}
+		return ""
+	}
+	cfg, _ := GetSystemConfig(game.System)
+	return cfg.Core
+}
+
+// LaunchGame writes an MGL file or loads an arcade MRA directly.
 func LaunchGame(game GameInfo) error {
 	// Verify ROM file exists before attempting to launch
 	if _, err := os.Stat(game.Path); err != nil {
 		return fmt.Errorf("ROM not found: %s", game.Path)
+	}
+
+	// Arcade MRA files: load directly (MiSTer parses <rbf> from the MRA)
+	if strings.HasSuffix(strings.ToLower(game.Path), ".mra") {
+		if err := ValidateCorePath(game.Path); err != nil {
+			return fmt.Errorf("invalid arcade descriptor: %w", err)
+		}
+		if _, err := ParseMRA(game.Path); err != nil {
+			return fmt.Errorf("invalid arcade descriptor: %w", err)
+		}
+		log.Printf("[misterclaw] launch (arcade-mra): load_core %s", game.Path)
+		if err := LoadCore(game.Path); err != nil {
+			return fmt.Errorf("loading core: %w", err)
+		}
+		return nil
 	}
 
 	mglContent := GenerateMGL(game)
@@ -394,7 +424,10 @@ func LaunchGame(game GameInfo) error {
 	//   GetOSD().ShowSplash("Loading...", game.Name)
 	//   time.Sleep(5 * time.Second)
 
-	if err := writeCmd("load_core " + launchPath); err != nil {
+	if err := ValidateCorePath(launchPath); err != nil {
+		return fmt.Errorf("invalid generated descriptor: %w", err)
+	}
+	if err := LoadCore(launchPath); err != nil {
 		return err
 	}
 
@@ -416,7 +449,11 @@ func LaunchGame(game GameInfo) error {
 		}
 		go func() {
 			time.Sleep(delay)
-			if err := OSDResetByCore(coreName); err != nil { log.Printf("[misterclaw] OSD reset failed: %v", err) } else { log.Printf("[misterclaw] OSD reset completed for %s", coreName) }
+			if err := OSDResetByCore(coreName); err != nil {
+				log.Printf("[misterclaw] OSD reset failed: %v", err)
+			} else {
+				log.Printf("[misterclaw] OSD reset completed for %s", coreName)
+			}
 		}()
 	}
 

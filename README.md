@@ -11,6 +11,26 @@ MiSTerClaw is the first MCP server for MiSTer-FPGA. Control your MiSTer from any
 
 MiSTerClaw lets AI agents — Claude, ChatGPT, OpenClaw, Hermes, Cursor, and others — control a MiSTer-FPGA over the network. Launch games, search your ROM library, take screenshots, read and modify core settings and DIP switches, navigate the OSD menu using conf_str-based position calculation (experimental, not yet reliable for all cores), query detailed system information, manage the system, and even set up Tailscale VPN for secure remote access from anywhere. Floppy-disk cores (PC8801, MSX, etc.) support PostLaunch auto-reset for seamless game loading. It uses the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) standard, so any MCP-compatible client works out of the box. For agents without MCP support, a CLI client is also included.
 
+## Arcade games
+
+Arcade games are indexed from `.mra` descriptors and launched directly; they are
+not represented by the MAME ZIP folder or a single system-wide RBF. Recursive
+canonical folders and `_alternatives` are supported on SD and USB. Generated
+`_Organized` views are omitted when canonical descriptors exist in the same
+root; an organized-only collection remains usable as a fallback. Byte-identical
+fallback descriptors are deduplicated, while different variants are retained.
+Counts describe indexed descriptors/variants, not unique game families. Cache
+schema v3 upgrades old v1/v2 Arcade and MAME entries in place while preserving
+unrelated cached systems; it does not require a full ROM rescan on upgrade.
+
+A location-specific SD rescan also refreshes `_Arcade`, and existing SD/USB
+Arcade folders are merged rather than replaced. Location rescans now return
+`status: pending` immediately; poll `systems.scanning` until it becomes false.
+Existing results remain available during the refresh. Requests for overlapping
+scans or invalid locations fail explicitly. MRA launches validate the file,
+recycle virtual input devices, and report the descriptor's requested `<rbf>` in
+`core_name`; this response is not by itself proof that the FPGA finished loading.
+
 ## MCP Setup
 
 Add MiSTerClaw to your MCP client config:

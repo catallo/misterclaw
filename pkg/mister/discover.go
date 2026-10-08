@@ -36,6 +36,7 @@ var (
 	usbPathFormat     = "/media/usb%d"
 	consoleCoresPath  = "/media/fat/_Console"
 	computerCoresPath = "/media/fat/_Computer"
+	arcadePath        = "/media/fat/_Arcade"
 )
 
 // CacheFilePath is the path to the persistent discovery cache file.
@@ -47,7 +48,7 @@ type diskCache struct {
 	Version   int                          `json:"version"`
 	Timestamp string                       `json:"timestamp"`
 	Systems   map[string]*DiscoveredSystem `json:"systems"`
-	Games     map[string][]GameInfo        `json:"games,omitempty"` // key = lowercase system name
+	Games     map[string][]GameInfo        `json:"games"` // nil when incomplete; key = lowercase system name
 }
 
 // Meta extensions excluded from ROM scanning.
@@ -78,10 +79,56 @@ var (
 	cacheMu       sync.RWMutex
 )
 
-// LoadCache attempts to load the discovery cache from disk.
-// Returns true if cache was loaded successfully.
+const discoveryCacheVersion = 3
+
+// Serialize rescans and cache-file writes without holding cacheMu during I/O.
+var rescanMu sync.Mutex
+var cacheFileMu sync.Mutex
+
+// cloneSystems returns an independent snapshot. Call under cacheMu when the
+// input is the shared cache; callers may safely iterate the returned map.
+func cloneSystems(systems map[string]*DiscoveredSystem) map[string]*DiscoveredSystem {
+	if systems == nil {
+		return nil
+	}
+	result := make(map[string]*DiscoveredSystem, len(systems))
+	for key, ds := range systems {
+		copyDS := *ds
+		copyDS.Folders = append([]SystemFolder(nil), ds.Folders...)
+		copyDS.Config.Extensions = append([]string(nil), ds.Config.Extensions...)
+		if ds.Config.PostLaunch != nil {
+			postLaunch := *ds.Config.PostLaunch
+			copyDS.Config.PostLaunch = &postLaunch
+		}
+		copyDS.Config.FormatOverrides = append([]FormatOverride(nil), ds.Config.FormatOverrides...)
+		for i, override := range copyDS.Config.FormatOverrides {
+			copyDS.Config.FormatOverrides[i].Extensions = append([]string(nil), override.Extensions...)
+			copyDS.Config.FormatOverrides[i].PostLaunchCombo = append([]string(nil), override.PostLaunchCombo...)
+			copyDS.Config.FormatOverrides[i].PostLaunchKeys = append([]string(nil), override.PostLaunchKeys...)
+		}
+		result[key] = &copyDS
+	}
+	return result
+}
+
+func cloneGames(games map[string][]GameInfo) map[string][]GameInfo {
+	if games == nil {
+		return nil
+	}
+	result := make(map[string][]GameInfo, len(games))
+	for key, entries := range games {
+		result[key] = append([]GameInfo(nil), entries...)
+	}
+	return result
+}
+
+// LoadCache migrates v1/v2 Arcade entries without rereading unrelated ROM
+// systems. Unknown schemas are invalidated. A v1 cache still needs the usual
+// background game-list collection because it never contained game listings.
 func LoadCache() bool {
+	cacheFileMu.Lock()
 	data, err := os.ReadFile(CacheFilePath)
+	cacheFileMu.Unlock()
 	if err != nil {
 		return false
 	}
@@ -90,36 +137,66 @@ func LoadCache() bool {
 		log.Printf("discovery: invalid cache file, will rescan: %v", err)
 		return false
 	}
-	if (dc.Version != 1 && dc.Version != 2) || dc.Systems == nil {
+	if dc.Version < 1 || dc.Version > discoveryCacheVersion {
+		log.Printf("discovery: unsupported cache schema v%d (current v%d); rebuilding discovery", dc.Version, discoveryCacheVersion)
 		return false
+	}
+	if dc.Systems == nil {
+		log.Printf("discovery: cache has no systems; will rescan")
+		return false
+	}
+	migrated := dc.Version != discoveryCacheVersion
+	if migrated {
+		log.Printf("discovery: migrating cache v%d to v%d: rebuilding only Arcade and removing MAME ROM entries", dc.Version, discoveryCacheVersion)
+		delete(dc.Systems, "arcade")
+		delete(dc.Systems, "mame")
+		arcadeSystems := discoverArcadeSystems()
+		if ds := arcadeSystems["arcade"]; ds != nil {
+			dc.Systems["arcade"] = ds
+		}
+		if dc.Version == 1 {
+			dc.Games = nil
+		} else if dc.Games != nil {
+			delete(dc.Games, "arcade")
+			delete(dc.Games, "mame")
+			if games := collectAllGames(arcadeSystems)["arcade"]; len(games) > 0 {
+				dc.Games["arcade"] = games
+			}
+		}
 	}
 	cacheMu.Lock()
 	cachedSystems = dc.Systems
+	cachedGames = dc.Games
 	cacheReady = true
 	cacheComplete = true
-	if dc.Version == 2 && dc.Games != nil {
-		cachedGames = dc.Games
-		gamesReady = true
-	}
+	gamesReady = dc.Games != nil
 	cacheMu.Unlock()
 	log.Printf("discovery: loaded %d systems from cache (%s)", len(dc.Systems), dc.Timestamp)
+	if migrated {
+		if err := SaveCache(); err != nil {
+			log.Printf("discovery: failed to persist migrated cache: %v", err)
+		}
+	}
 	return true
 }
 
-// SaveCache writes the current discovery cache to disk.
+// SaveCache snapshots under the read lock and atomically replaces the disk
+// cache, so readers never encounter partially written JSON.
 func SaveCache() error {
+	cacheFileMu.Lock()
+	defer cacheFileMu.Unlock()
 	cacheMu.RLock()
-	systems := cachedSystems
-	games := cachedGames
-	cacheMu.RUnlock()
-	if systems == nil {
-		return nil
-	}
 	dc := diskCache{
-		Version:   2,
+		Version:   discoveryCacheVersion,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Systems:   systems,
-		Games:     games,
+		Systems:   cloneSystems(cachedSystems),
+	}
+	if gamesReady {
+		dc.Games = cloneGames(cachedGames)
+	}
+	cacheMu.RUnlock()
+	if dc.Systems == nil {
+		return nil
 	}
 	data, err := json.Marshal(dc)
 	if err != nil {
@@ -129,16 +206,40 @@ func SaveCache() error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(CacheFilePath, data, 0644); err != nil {
+	file, err := os.CreateTemp(dir, ".misterclaw-cache-*")
+	if err != nil {
 		return err
 	}
-	log.Printf("discovery: saved %d systems to cache", len(systems))
+	defer os.Remove(file.Name())
+	if err := file.Chmod(0644); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(file.Name(), CacheFilePath); err != nil {
+		return err
+	}
+	log.Printf("discovery: saved %d systems to v%d cache", len(dc.Systems), discoveryCacheVersion)
 	return nil
 }
 
 // DeleteCacheFile removes the persistent cache file from disk.
 func DeleteCacheFile() {
-	os.Remove(CacheFilePath)
+	cacheFileMu.Lock()
+	defer cacheFileMu.Unlock()
+	if err := os.Remove(CacheFilePath); err != nil && !os.IsNotExist(err) {
+		log.Printf("discovery: failed to delete cache: %v", err)
+	}
 }
 
 // StartDiscovery begins system discovery. Call once at server startup.
@@ -168,10 +269,12 @@ func StartDiscovery() {
 			cacheMu.Unlock()
 			return
 		}
-		// v1 cache loaded (no games) — collect games in background
+		// Current-schema cache without game listings: collect in background.
 		go func() {
+			rescanMu.Lock()
+			defer rescanMu.Unlock()
 			cacheMu.RLock()
-			systems := cachedSystems
+			systems := cloneSystems(cachedSystems)
 			cacheMu.RUnlock()
 			games := collectAllGames(systems)
 			cacheMu.Lock()
@@ -189,6 +292,8 @@ func StartDiscovery() {
 
 	// All phases run in background so server can start accepting connections immediately
 	go func() {
+		rescanMu.Lock()
+		defer rescanMu.Unlock()
 		// Phase 1: fast discovery (folder names + systemDefaults)
 		systems := discoverSystemsFast()
 		cacheMu.Lock()
@@ -236,11 +341,19 @@ func IsDiscoveryComplete() bool {
 func getDiscoveredSystems() map[string]*DiscoveredSystem {
 	cacheMu.RLock()
 	defer cacheMu.RUnlock()
-	return cachedSystems
+	return cloneSystems(cachedSystems)
 }
 
 // InvalidateCache clears the discovery cache, deletes the cache file, and triggers re-discovery.
 func InvalidateCache() {
+	rescanMu.Lock()
+	defer rescanMu.Unlock()
+	invalidateCacheLocked()
+}
+
+// invalidateCacheLocked is called with rescanMu held, preventing an older
+// location scan from publishing into a cache that has just been cleared.
+func invalidateCacheLocked() {
 	DeleteCacheFile()
 	cacheMu.Lock()
 	cacheReady = false
@@ -257,125 +370,100 @@ func InvalidateCache() {
 // results into the existing cache. Returns the number of systems found at
 // that location.
 func RescanLocation(location string) int {
+	if locationToPath(location) == "" {
+		return 0
+	}
+	rescanMu.Lock()
+	defer rescanMu.Unlock()
+	return rescanLocationLocked(location)
+}
+
+// rescanLocationLocked runs with rescanMu held by either the synchronous
+// wrapper or its asynchronous job owner.
+func rescanLocationLocked(location string) int {
 	parent := locationToPath(location)
-	if parent == "" {
+	cacheMu.RLock()
+	hasCache := cachedSystems != nil
+	cacheMu.RUnlock()
+	if !hasCache {
+		// Startup owns the full initial scan; do not invent a partial cache.
+		StartDiscovery()
 		return 0
 	}
 
-	cacheMu.RLock()
-	existing := cachedSystems
-	cacheMu.RUnlock()
-	if existing == nil {
-		// No cache yet — do a full discovery instead
-		InvalidateCache()
-		cacheMu.RLock()
-		defer cacheMu.RUnlock()
-		count := 0
-		for _, ds := range cachedSystems {
-			for _, f := range ds.Folders {
-				if f.Location == location {
-					count++
-					break
-				}
+	// Scan only the requested location, including the separate SD _Arcade
+	// root. Never rebuild unrelated USB systems or reread their game files.
+	scanned := make(map[string]*DiscoveredSystem)
+	scanDiscoveryLocation(scanned, parent, location)
+	if location == "sd" {
+		addArcadeFolder(scanned, arcadePath, "sd")
+	}
+	matchDiscoveredCores(scanned)
+	discoverSystemsFull(scanned)
+	newGames := collectAllGames(scanned)
+
+	cacheMu.Lock()
+	mergedSystems := cloneSystems(cachedSystems)
+	mergedGames := cloneGames(cachedGames)
+	if mergedGames == nil {
+		mergedGames = make(map[string][]GameInfo)
+	}
+	affected := make(map[string]bool)
+	for key, ds := range mergedSystems {
+		var kept []SystemFolder
+		for _, folder := range ds.Folders {
+			if folder.Location == location {
+				affected[key] = true
+			} else {
+				kept = append(kept, folder)
 			}
 		}
-		return count
-	}
-
-	// Remove old folders for this location from cache
-	cacheMu.Lock()
-	for key, ds := range cachedSystems {
-		var kept []SystemFolder
-		for _, f := range ds.Folders {
-			if f.Location != location {
-				kept = append(kept, f)
-			}
+		if !affected[key] {
+			continue
 		}
 		if len(kept) == 0 {
-			delete(cachedSystems, key)
+			delete(mergedSystems, key)
 		} else {
 			ds.Folders = kept
 			ds.TotalROMs = 0
-			for _, f := range kept {
-				ds.TotalROMs += f.RomCount
+			for _, folder := range kept {
+				ds.TotalROMs += folder.RomCount
 			}
 		}
 	}
-	cacheMu.Unlock()
-
-	// Scan the location
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		return 0
+	for key, ds := range scanned {
+		affected[key] = true
+		if existing := mergedSystems[key]; existing != nil {
+			existing.Folders = append(existing.Folders, ds.Folders...)
+			existing.TotalROMs += ds.TotalROMs
+			existing.Config = mergeRefreshedConfig(existing.Name, existing.Config, ds.Config)
+			existing.HasCore = existing.HasCore || ds.HasCore
+		} else {
+			mergedSystems[key] = ds
+		}
 	}
-
-	cores := scanCores()
-	mglMappings := parseMGLFiles()
-	systemsFound := 0
-
-	cacheMu.Lock()
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		dirPath := filepath.Join(parent, e.Name())
-		key := strings.ToLower(e.Name())
-
-		count := countFiles(dirPath)
-		if count == 0 {
-			continue
-		}
-
-		ds, exists := cachedSystems[key]
-		if !exists {
-			ds = &DiscoveredSystem{Name: e.Name()}
-			if cfg, ok := getDefaultConfig(e.Name()); ok {
-				ds.Config = cfg
-				ds.HasCore = true
-			} else {
-				ds.NeedsScan = true
-				// Try core/MGL matching
-				if corePath, ok := cores[key]; ok {
-					ds.Config.Core = corePath
-					ds.HasCore = true
-					ds.NeedsScan = false
-				} else if corePath, ok := mglMappings[e.Name()]; ok {
-					ds.Config.Core = corePath
-					ds.Config.SetName = e.Name()
-					ds.HasCore = true
-					ds.NeedsScan = false
-				}
+	for key := range affected {
+		var kept []GameInfo
+		for _, game := range mergedGames[key] {
+			if game.Location != location {
+				kept = append(kept, game)
 			}
-			cachedSystems[key] = ds
 		}
-
-		ds.Folders = append(ds.Folders, SystemFolder{
-			Path:     dirPath,
-			Location: location,
-			RomCount: count,
-		})
-		ds.TotalROMs += count
-		systemsFound++
+		kept = append(kept, newGames[key]...)
+		if len(kept) == 0 {
+			delete(mergedGames, key)
+		} else {
+			mergedGames[key] = kept
+		}
 	}
+	cachedSystems = mergedSystems
+	cachedGames = mergedGames
 	cacheMu.Unlock()
 
-	// Rebuild game listings for affected systems
-	cacheMu.RLock()
-	currentSystems := cachedSystems
-	cacheMu.RUnlock()
-	games := collectAllGames(currentSystems)
-	cacheMu.Lock()
-	cachedGames = games
-	gamesReady = true
-	cacheMu.Unlock()
-
-	// Save updated cache to disk
 	if err := SaveCache(); err != nil {
 		log.Printf("discovery: failed to save cache after rescan: %v", err)
 	}
-
-	return systemsFound
+	return len(scanned)
 }
 
 // locationToPath converts a location name to its filesystem path.
@@ -383,15 +471,8 @@ func locationToPath(location string) string {
 	if location == "sd" {
 		return sdGamesPath
 	}
-	if strings.HasPrefix(location, "usb") {
-		numStr := strings.TrimPrefix(location, "usb")
-		if n, err := fmt.Sscanf(numStr, "%d", new(int)); err == nil && n == 1 {
-			var idx int
-			fmt.Sscanf(numStr, "%d", &idx)
-			if idx >= 0 && idx <= 7 {
-				return fmt.Sprintf(usbPathFormat, idx)
-			}
-		}
+	if len(location) == 4 && strings.HasPrefix(location, "usb") && location[3] >= '0' && location[3] <= '7' {
+		return fmt.Sprintf(usbPathFormat, int(location[3]-'0'))
 	}
 	return ""
 }
@@ -543,93 +624,73 @@ func countFiles(dir string) int {
 	return count
 }
 
-// discoverSystemsFast performs Phase 1 discovery: scan folder names, use systemDefaults
-// extensions for known systems, count top-level entries only (approximate counts).
-// This is fast (<2s even with many USB drives) because it never recurses into ROM folders.
-func discoverSystemsFast() map[string]*DiscoveredSystem {
-	systems := make(map[string]*DiscoveredSystem)
-
-	scanLocation := func(parent, location string) {
-		entries, err := os.ReadDir(parent)
-		if err != nil {
-			return
+// scanDiscoveryLocation shares startup/rescan folder policies. Normal ROM
+// systems retain shallow counts; only Arcade requires recursive MRA selection.
+func scanDiscoveryLocation(systems map[string]*DiscoveredSystem, parent, location string) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("discovery: cannot scan location %s: %v", location, err)
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			dirPath := filepath.Join(parent, e.Name())
-			key := strings.ToLower(e.Name())
-
-			// For known systems, use systemDefaults extensions; count top-level only
-			if cfg, ok := getDefaultConfig(e.Name()); ok {
-				count := countFiles(dirPath)
-				if count == 0 {
-					continue
-				}
-				ds, exists := systems[key]
-				if !exists {
-					ds = &DiscoveredSystem{Name: e.Name(), Config: cfg, HasCore: true}
-					systems[key] = ds
-				}
-				ds.Folders = append(ds.Folders, SystemFolder{
-					Path:     dirPath,
-					Location: location,
-					RomCount: count,
-				})
-				ds.TotalROMs += count
-				continue
-			}
-
-			// Unknown system: just check it has any non-meta files at top level
-			count := countFiles(dirPath)
-			if count == 0 {
-				continue
-			}
-			ds, exists := systems[key]
-			if !exists {
-				ds = &DiscoveredSystem{Name: e.Name(), NeedsScan: true}
-				systems[key] = ds
-			}
-			ds.Folders = append(ds.Folders, SystemFolder{
-				Path:     dirPath,
-				Location: location,
-				RomCount: count,
-			})
-			ds.TotalROMs += count
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.EqualFold(entry.Name(), "mame") {
+			continue
 		}
+		dirPath := filepath.Join(parent, entry.Name())
+		key := strings.ToLower(entry.Name())
+		if key == "arcade" {
+			addArcadeFolder(systems, dirPath, location)
+			continue
+		}
+		count := countFiles(dirPath)
+		if count == 0 {
+			continue
+		}
+		ds := systems[key]
+		if ds == nil {
+			ds = &DiscoveredSystem{Name: entry.Name(), NeedsScan: true}
+			if cfg, ok := getDefaultConfig(entry.Name()); ok {
+				ds.Config = cfg
+				ds.HasCore = true
+				ds.NeedsScan = false
+			}
+			systems[key] = ds
+		}
+		ds.Folders = append(ds.Folders, SystemFolder{Path: dirPath, Location: location, RomCount: count})
+		ds.TotalROMs += count
 	}
+}
 
-	scanLocation(sdGamesPath, "sd")
-	for i := 0; i <= 7; i++ {
-		scanLocation(fmt.Sprintf(usbPathFormat, i), fmt.Sprintf("usb%d", i))
-	}
-
-	// Match unknown systems to cores and MGL files
+func matchDiscoveredCores(systems map[string]*DiscoveredSystem) {
 	cores := scanCores()
 	mglMappings := parseMGLFiles()
-
 	for key, ds := range systems {
 		if ds.HasCore {
-			continue // Already matched via systemDefaults
+			continue
 		}
-
-		// Try direct core name match
 		if corePath, ok := cores[key]; ok {
 			ds.Config.Core = corePath
 			ds.HasCore = true
-		}
-
-		// Try MGL setname match
-		if !ds.HasCore {
-			if corePath, ok := mglMappings[ds.Name]; ok {
-				ds.Config.Core = corePath
-				ds.Config.SetName = ds.Name
-				ds.HasCore = true
-			}
+		} else if corePath, ok := mglMappings[ds.Name]; ok {
+			ds.Config.Core = corePath
+			ds.Config.SetName = ds.Name
+			ds.HasCore = true
 		}
 	}
+}
 
+// discoverSystemsFast uses shallow counts for ordinary ROM systems. Arcade
+// uses its full recursive policy, skipping generated views whenever possible.
+func discoverSystemsFast() map[string]*DiscoveredSystem {
+	systems := make(map[string]*DiscoveredSystem)
+	scanDiscoveryLocation(systems, sdGamesPath, "sd")
+	for i := 0; i <= 7; i++ {
+		scanDiscoveryLocation(systems, fmt.Sprintf(usbPathFormat, i), fmt.Sprintf("usb%d", i))
+	}
+	addArcadeFolder(systems, arcadePath, "sd")
+	matchDiscoveredCores(systems)
 	return systems
 }
 
@@ -748,7 +809,7 @@ func IsGamesReady() bool {
 func getCachedGames() map[string][]GameInfo {
 	cacheMu.RLock()
 	defer cacheMu.RUnlock()
-	return cachedGames
+	return cloneGames(cachedGames)
 }
 
 // collectAllGames scans all discovered systems and collects GameInfo entries.
@@ -782,7 +843,11 @@ func collectAllGames(systems map[string]*DiscoveredSystem) map[string][]GameInfo
 		}
 		var sysGames []GameInfo
 		for _, folder := range w.folders {
-			sysGames = append(sysGames, scanDir(folder.Path, w.name, folder.Location, extSet)...)
+			if strings.EqualFold(w.name, "Arcade") {
+				sysGames = append(sysGames, scanArcadeFolder(folder.Path, w.name, folder.Location)...)
+			} else {
+				sysGames = append(sysGames, scanDir(folder.Path, w.name, folder.Location, extSet)...)
+			}
 		}
 		if len(sysGames) > 0 {
 			games[w.key] = sysGames

@@ -81,17 +81,23 @@ type ResizeRequest struct {
 
 // Server is a TCP server handling the MisterClaw JSON protocol.
 type Server struct {
-	listener net.Listener
-	manager  *session.Manager
-	clients  map[net.Conn]struct{}
-	mu       sync.Mutex
+	listener            net.Listener
+	manager             *session.Manager
+	clients             map[net.Conn]struct{}
+	mu                  sync.Mutex
+	launchGame          func(mister.GameInfo) error // per-server injection for hardware-free tests
+	startLocationRescan func(string) bool
+	startFullRescan     func() bool
 }
 
 // New creates a new Server.
 func New(manager *session.Manager) *Server {
 	return &Server{
-		manager: manager,
-		clients: make(map[net.Conn]struct{}),
+		manager:             manager,
+		clients:             make(map[net.Conn]struct{}),
+		launchGame:          mister.LaunchGame,
+		startLocationRescan: mister.StartRescanLocation,
+		startFullRescan:     mister.StartFullRescan,
 	}
 }
 
@@ -450,10 +456,12 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 			})
 			return
 		}
+		complete := mister.IsDiscoveryComplete()
 		send(map[string]interface{}{
 			"mister":   "systems",
 			"systems":  stats,
-			"complete": mister.IsDiscoveryComplete(),
+			"complete": complete,
+			"scanning": !complete,
 		})
 
 	case "search":
@@ -508,8 +516,7 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 			return
 		}
 
-		cfg, _ := mister.GetSystemConfig(game.System)
-		err := mister.LaunchGame(*game)
+		err := s.launchGame(*game)
 		if err != nil {
 			send(map[string]interface{}{
 				"mister":  "launch",
@@ -522,7 +529,7 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 			"mister":    "launch",
 			"success":   true,
 			"game":      game.Name,
-			"core_name": cfg.Core,
+			"core_name": mister.LaunchCoreName(*game),
 		})
 
 	case "input":
@@ -867,7 +874,10 @@ func (s *Server) handleReload(req Request, send func(interface{})) {
 func (s *Server) handleRescan(req Request, send func(interface{})) {
 	location := req.Location
 	if location == "" {
-		mister.InvalidateCache()
+		if !s.startFullRescan() {
+			send(map[string]interface{}{"mister": "rescan", "success": false, "error": "discovery is already running; wait for completion"})
+			return
+		}
 		// Respond immediately — scan runs in background
 		send(map[string]interface{}{
 			"mister":   "rescan",
@@ -878,12 +888,16 @@ func (s *Server) handleRescan(req Request, send func(interface{})) {
 		return
 	}
 
-	systemsFound := mister.RescanLocation(location)
+	if !s.startLocationRescan(location) {
+		send(map[string]interface{}{"mister": "rescan", "success": false, "error": "invalid location, discovery already running, or initial cache not ready"})
+		return
+	}
 	send(map[string]interface{}{
-		"mister":        "rescan",
-		"success":       true,
-		"systems_found": systemsFound,
-		"location":      location,
+		"mister":   "rescan",
+		"success":  true,
+		"status":   "pending",
+		"message":  "Location rescan started in background. Use 'systems' to check the scanning flag; existing results remain available until completion.",
+		"location": location,
 	})
 }
 
@@ -1090,14 +1104,14 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 		}
 
 		send(map[string]interface{}{
-			"mister":      "cfg_write",
-			"success":     true,
-			"core_name":   ctx.OSD.CoreName,
-			"option":      item.Name,
-			"value":       req.Value,
-			"value_index": valIdx,
-			"cfg_path":    ctx.CFGPath,
-			"source":      "cfg",
+			"mister":          "cfg_write",
+			"success":         true,
+			"core_name":       ctx.OSD.CoreName,
+			"option":          item.Name,
+			"value":           req.Value,
+			"value_index":     valIdx,
+			"cfg_path":        ctx.CFGPath,
+			"source":          "cfg",
 			"reload_required": true,
 		})
 		return
@@ -1130,14 +1144,14 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 			}
 
 			send(map[string]interface{}{
-				"mister":      "cfg_write",
-				"success":     true,
-				"core_name":   ctx.OSD.CoreName,
-				"option":      dip.Name,
-				"value":       req.Value,
-				"value_index": valIdx,
-				"dip_path":    ctx.DIPPath,
-				"source":      "dip",
+				"mister":          "cfg_write",
+				"success":         true,
+				"core_name":       ctx.OSD.CoreName,
+				"option":          dip.Name,
+				"value":           req.Value,
+				"value_index":     valIdx,
+				"dip_path":        ctx.DIPPath,
+				"source":          "dip",
 				"reload_required": true,
 			})
 			return

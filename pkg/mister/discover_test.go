@@ -11,6 +11,7 @@ import (
 )
 
 func TestExtractCoreName(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tests := []struct {
 		input string
 		want  string
@@ -40,6 +41,7 @@ func TestExtractCoreName(t *testing.T) {
 }
 
 func TestScanCores(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	consoleDir := filepath.Join(tmp, "_Console")
 	computerDir := filepath.Join(tmp, "_Computer")
@@ -80,6 +82,7 @@ func TestScanCores(t *testing.T) {
 }
 
 func TestParseMGLFiles(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	consoleDir := filepath.Join(tmp, "_Console")
 	os.MkdirAll(consoleDir, 0755)
@@ -123,6 +126,7 @@ func TestParseMGLFiles(t *testing.T) {
 }
 
 func TestScanFolderExtensions(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 
 	// Create ROM files with various extensions
@@ -150,6 +154,7 @@ func TestScanFolderExtensions(t *testing.T) {
 }
 
 func TestScanFolderExtensions_Subdirectories(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	subDir := filepath.Join(tmp, "USA")
 	os.MkdirAll(subDir, 0755)
@@ -164,6 +169,7 @@ func TestScanFolderExtensions_Subdirectories(t *testing.T) {
 }
 
 func TestDiscoverSystems_FullIntegration(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 
 	// Set up ROM folders
@@ -214,11 +220,12 @@ func TestDiscoverSystems_FullIntegration(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	systems := discoverSystems()
@@ -287,6 +294,7 @@ func TestDiscoverSystems_FullIntegration(t *testing.T) {
 }
 
 func TestDiscoverSystems_MGLMapping(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 
 	// Set up ROM folder for GameGear
@@ -323,11 +331,12 @@ func TestDiscoverSystems_MGLMapping(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	systems := discoverSystems()
@@ -346,6 +355,7 @@ func TestDiscoverSystems_MGLMapping(t *testing.T) {
 }
 
 func TestCaseInsensitiveMatching(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 
 	// Create folders with different cases
@@ -373,11 +383,12 @@ func TestCaseInsensitiveMatching(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	systems := discoverSystems()
@@ -395,6 +406,7 @@ func TestCaseInsensitiveMatching(t *testing.T) {
 }
 
 func TestInvalidateCache(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	gamesDir := filepath.Join(tmp, "games")
 	nesDir := filepath.Join(gamesDir, "NES")
@@ -417,11 +429,12 @@ func TestInvalidateCache(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	// First discovery
@@ -456,10 +469,11 @@ func TestInvalidateCache(t *testing.T) {
 }
 
 func TestGetSystemConfig_DiscoveryFallback(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	// When no ROM folders exist for a system, GetSystemConfig should
 	// fall back to systemDefaults
-	InvalidateCache()
-	defer InvalidateCache()
+	resetDiscoveryTestState(t)
+	defer resetDiscoveryTestState(t)
 
 	cfg, ok := GetSystemConfig("SNES")
 	if !ok {
@@ -471,6 +485,7 @@ func TestGetSystemConfig_DiscoveryFallback(t *testing.T) {
 }
 
 func TestGenerateMGL_WithDiscoveredSystem(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	gamesDir := filepath.Join(tmp, "games")
 	nesDir := filepath.Join(gamesDir, "NES")
@@ -493,11 +508,12 @@ func TestGenerateMGL_WithDiscoveredSystem(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	game := GameInfo{
@@ -523,6 +539,7 @@ func TestGenerateMGL_WithDiscoveredSystem(t *testing.T) {
 }
 
 func TestDiscoverSystems_EmptyFolder(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	gamesDir := filepath.Join(tmp, "games")
 	// Create empty system folder (no ROMs)
@@ -549,11 +566,12 @@ func TestDiscoverSystems_EmptyFolder(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	systems := discoverSystems()
@@ -567,6 +585,7 @@ func TestDiscoverSystems_EmptyFolder(t *testing.T) {
 }
 
 func TestExtensionDetection_CDSystems(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	gamesDir := filepath.Join(tmp, "games")
 	psxDir := filepath.Join(gamesDir, "NewCDSystem")
@@ -590,11 +609,12 @@ func TestExtensionDetection_CDSystems(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
 		computerCoresPath = oldComputer
-		InvalidateCache()
+		resetDiscoveryTestState(t)
 	}()
 
 	systems := discoverSystems()
@@ -624,10 +644,11 @@ func TestExtensionDetection_CDSystems(t *testing.T) {
 }
 
 func TestSaveAndLoadCache(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	oldCachePath := CacheFilePath
 	CacheFilePath = filepath.Join(tmp, "cache.json")
-	defer func() { CacheFilePath = oldCachePath }()
+	defer func() { waitForDiscoveryJobs(t); CacheFilePath = oldCachePath }()
 
 	// Set up minimal ROM structure
 	gamesDir := filepath.Join(tmp, "games")
@@ -643,6 +664,7 @@ func TestSaveAndLoadCache(t *testing.T) {
 	consoleCoresPath = filepath.Join(tmp, "_Console")
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
@@ -677,8 +699,8 @@ func TestSaveAndLoadCache(t *testing.T) {
 	if err := json.Unmarshal(data, &dc); err != nil {
 		t.Fatalf("cache file invalid JSON: %v", err)
 	}
-	if dc.Version != 2 {
-		t.Errorf("cache version = %d, want 2", dc.Version)
+	if dc.Version != discoveryCacheVersion {
+		t.Errorf("cache version = %d, want %d", dc.Version, discoveryCacheVersion)
 	}
 	if _, ok := dc.Systems["nes"]; !ok {
 		t.Error("cache missing NES system")
@@ -717,10 +739,11 @@ func TestSaveAndLoadCache(t *testing.T) {
 }
 
 func TestStartDiscovery_UsesCache(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	oldCachePath := CacheFilePath
 	CacheFilePath = filepath.Join(tmp, "cache.json")
-	defer func() { CacheFilePath = oldCachePath }()
+	defer func() { waitForDiscoveryJobs(t); CacheFilePath = oldCachePath }()
 
 	// Write a fake cache file
 	dc := diskCache{
@@ -756,6 +779,7 @@ func TestStartDiscovery_UsesCache(t *testing.T) {
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	os.MkdirAll(sdGamesPath, 0755)
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
@@ -795,10 +819,11 @@ func TestStartDiscovery_UsesCache(t *testing.T) {
 }
 
 func TestInvalidateCache_DeletesFile(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	oldCachePath := CacheFilePath
 	CacheFilePath = filepath.Join(tmp, "cache.json")
-	defer func() { CacheFilePath = oldCachePath }()
+	defer func() { waitForDiscoveryJobs(t); CacheFilePath = oldCachePath }()
 
 	// Create a cache file
 	os.WriteFile(CacheFilePath, []byte(`{"version":1,"timestamp":"x","systems":{}}`), 0644)
@@ -812,6 +837,7 @@ func TestInvalidateCache_DeletesFile(t *testing.T) {
 	computerCoresPath = filepath.Join(tmp, "_Computer")
 	os.MkdirAll(sdGamesPath, 0755)
 	defer func() {
+		waitForDiscoveryJobs(t)
 		sdGamesPath = oldSD
 		usbPathFormat = oldUSB
 		consoleCoresPath = oldConsole
@@ -834,10 +860,11 @@ func TestInvalidateCache_DeletesFile(t *testing.T) {
 }
 
 func TestLoadCache_InvalidJSON(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	oldCachePath := CacheFilePath
 	CacheFilePath = filepath.Join(tmp, "cache.json")
-	defer func() { CacheFilePath = oldCachePath }()
+	defer func() { waitForDiscoveryJobs(t); CacheFilePath = oldCachePath }()
 
 	os.WriteFile(CacheFilePath, []byte("not json"), 0644)
 	if LoadCache() {
@@ -846,10 +873,11 @@ func TestLoadCache_InvalidJSON(t *testing.T) {
 }
 
 func TestLoadCache_WrongVersion(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	tmp := t.TempDir()
 	oldCachePath := CacheFilePath
 	CacheFilePath = filepath.Join(tmp, "cache.json")
-	defer func() { CacheFilePath = oldCachePath }()
+	defer func() { waitForDiscoveryJobs(t); CacheFilePath = oldCachePath }()
 
 	os.WriteFile(CacheFilePath, []byte(`{"version":99,"timestamp":"x","systems":{}}`), 0644)
 	if LoadCache() {
@@ -858,6 +886,7 @@ func TestLoadCache_WrongVersion(t *testing.T) {
 }
 
 func TestSystemConfigJSONTags(t *testing.T) {
+	waitForDiscoveryJobs(t)
 	cfg := SystemConfig{
 		Core:       "_Console/SNES",
 		Delay:      2,
