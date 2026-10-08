@@ -141,12 +141,9 @@ func (s *Server) Close() {
 }
 
 func (s *Server) handleConn(conn net.Conn) {
-	// Track which sessions THIS connection fed commands into, so they can be
-	// drained if the client vanishes (task #18 abandoned-queue hazard: a
-	// killed/TaskStop'd client — e.g. the golden suite — used to leave its
-	// queued commands running, blanket-killing the user's live hack).
-	usedSessions := make(map[string]struct{})
-	var usedMu sync.Mutex
+	// The lifetime belongs to the accepted connection, not a client-chosen
+	// session/agent/request ID. Reconnects can safely reuse the same name.
+	owner := session.NewOwner()
 
 	// In-progress host->device push for this connection (task #36). Cleaned
 	// up on disconnect so an interrupted transfer leaves no stray temp file.
@@ -159,17 +156,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		delete(s.clients, conn)
 		s.mu.Unlock()
 
-		usedMu.Lock()
-		names := make([]string, 0, len(usedSessions))
-		for name := range usedSessions {
-			names = append(names, name)
-		}
-		usedMu.Unlock()
-		for _, name := range names {
-			if n := s.manager.Drain(name); n > 0 {
-				log.Printf("client %s gone: drained %d queued command(s) from session %q", conn.RemoteAddr(), n, name)
-			}
-		}
+		owner.Close() // cancel only this connection's active and queued jobs
 
 		log.Printf("client disconnected: %s", conn.RemoteAddr())
 	}()
@@ -223,22 +210,11 @@ func (s *Server) handleConn(conn net.Conn) {
 			continue
 		}
 
-		// Remember sessions this connection ran commands in.
-		if req.Cmd != "" {
-			name := req.Session
-			if name == "" {
-				name = "default"
-			}
-			usedMu.Lock()
-			usedSessions[name] = struct{}{}
-			usedMu.Unlock()
-		}
-
-		s.dispatch(req, send)
+		s.dispatch(req, send, owner)
 	}
 }
 
-func (s *Server) dispatch(req Request, send func(interface{})) {
+func (s *Server) dispatch(req Request, send func(interface{}), owner *session.Owner) {
 	switch {
 	case req.List != nil && *req.List:
 		s.handleList(send)
@@ -262,7 +238,7 @@ func (s *Server) dispatch(req Request, send func(interface{})) {
 		s.handleMiSTer(req, send)
 
 	case req.Cmd != "":
-		s.handleCmd(req, send)
+		s.handleCmd(req, send, owner)
 
 	default:
 		send(map[string]interface{}{
@@ -350,7 +326,7 @@ func (s *Server) handleInput(req Request, send func(interface{})) {
 	}
 }
 
-func (s *Server) handleCmd(req Request, send func(interface{})) {
+func (s *Server) handleCmd(req Request, send func(interface{}), owner *session.Owner) {
 	sessionName := req.Session
 	if sessionName == "" {
 		sessionName = "default"
@@ -383,7 +359,7 @@ func (s *Server) handleCmd(req Request, send func(interface{})) {
 		})
 	}
 
-	s.manager.Execute(sessionName, req.Cmd, usePty, req.Agent, outputCb, doneCb)
+	s.manager.ExecuteOwned(owner, sessionName, req.Cmd, usePty, req.Agent, outputCb, doneCb)
 }
 
 func (s *Server) handleMiSTer(req Request, send func(interface{})) {
