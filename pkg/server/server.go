@@ -350,16 +350,18 @@ func (s *Server) handleCmd(req Request, send func(interface{}), owner *session.O
 		})
 	}
 
-	doneCb := func(exitCode int) {
-		send(map[string]interface{}{
-			"id":        id,
-			"done":      true,
-			"exit_code": exitCode,
-			"sessions":  s.manager.List(),
-		})
+	doneCb := func(result session.Result) {
+		response := map[string]interface{}{
+			"id": id, "done": true, "exit_code": result.ExitCode,
+			"sessions": s.manager.List(),
+		}
+		if result.Err != nil {
+			response["error"] = result.Err.Error()
+		}
+		send(response)
 	}
 
-	s.manager.ExecuteOwned(owner, sessionName, req.Cmd, usePty, req.Agent, outputCb, doneCb)
+	_ = s.manager.Submit(owner, sessionName, req.Cmd, usePty, req.Agent, outputCb, doneCb)
 }
 
 func (s *Server) handleMiSTer(req Request, send func(interface{})) {

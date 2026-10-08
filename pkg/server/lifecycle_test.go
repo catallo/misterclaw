@@ -215,9 +215,24 @@ func TestDisconnectWithMoreThanChannelCapacityQueued(t *testing.T) {
 		old.cmd(t, fmt.Sprint(i), "exit 19")
 	}
 	old.send(t, map[string]interface{}{"list": true})
-	old.await(t, func(e map[string]interface{}) bool { return e["list"] == true })
-	if got := mgr.Get("reconnect").Info().Pending; got != 100 {
-		t.Fatalf("Pending = %d, want 100", got)
+	rejected := 0
+	for {
+		e := old.await(t, func(map[string]interface{}) bool { return true })
+		if e["list"] == true {
+			break
+		}
+		if e["done"] == true && e["exit_code"] == float64(session.ExitRejected) {
+			if e["error"] == nil {
+				t.Fatal("admission rejection has no reason")
+			}
+			rejected++
+		}
+	}
+	if got := mgr.Get("reconnect").Info().Pending; got != mgr.Limits().SessionJobs-1 {
+		t.Fatalf("Pending = %d", got)
+	}
+	if rejected != 100-(mgr.Limits().SessionJobs-1) {
+		t.Fatalf("rejections = %d", rejected)
 	}
 	old.conn.Close()
 	awaitSignal(t, old.ended, "backlogged disconnect cleanup")

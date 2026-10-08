@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,7 +106,9 @@ type command struct {
 	line     string
 	usePty   bool
 	outputCb ptyPkg.OutputCallback
-	doneCb   func(int)
+	doneCb   func(Result)
+	cost     int
+	admitted bool
 }
 
 // Session represents a named execution context with sequential command execution.
@@ -121,10 +124,15 @@ type Session struct {
 	done     chan struct{} // closed when the worker exits
 	closed   bool
 	gen      uint64
+	budget   *admissionBudget
 }
 
 func newSession(name string) *Session {
-	s := &Session{Name: name, status: StatusIdle, done: make(chan struct{})}
+	return newManagedSession(name, newBudget(DefaultLimits()))
+}
+
+func newManagedSession(name string, budget *admissionBudget) *Session {
+	s := &Session{Name: name, status: StatusIdle, done: make(chan struct{}), budget: budget}
 	s.ready = sync.NewCond(&s.mu)
 	go s.processQueue()
 	return s
@@ -155,8 +163,20 @@ func (s *Session) processQueue() {
 }
 
 func (s *Session) finish(job *command, code int) {
+	s.finishResult(job, Result{ExitCode: code})
+}
+
+func (s *Session) finishResult(job *command, result Result) {
+	callback := job.doneCb
+	// Drop retained payloads before freeing admission credits, including when
+	// a completion callback chains submissions or blocks on external work.
+	job.line, job.shell, job.outputCb, job.doneCb = "", "", nil, nil
+	if job.admitted {
+		s.budget.release(s, job.owner, job.cost)
+		job.admitted = false
+	}
 	job.owner.release(s)
-	job.doneCb(code)
+	callback(result)
 }
 
 func (s *Session) run(job *command) {
@@ -214,29 +234,54 @@ func (s *Session) run(job *command) {
 
 // Execute is the ownerless API for in-process callers. Explicit Drain still
 // affects these commands as well as commands from every connection.
-func (s *Session) Execute(shell, cmdLine string, usePty bool, outputCb ptyPkg.OutputCallback, doneCb func(int)) {
-	s.execute(nil, shell, cmdLine, usePty, "", outputCb, doneCb)
+func (s *Session) Execute(shell, cmdLine string, usePty bool, outputCb ptyPkg.OutputCallback, doneCb func(int)) error {
+	return s.execute(nil, shell, cmdLine, usePty, "", outputCb, func(r Result) { doneCb(r.ExitCode) })
 }
 
-func (s *Session) execute(owner *Owner, shell, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(int)) {
-	job := &command{owner: owner, shell: shell, line: cmdLine, usePty: usePty, outputCb: outputCb, doneCb: doneCb}
+func (s *Session) execute(owner *Owner, shell, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(Result)) error {
+	if len(shell) > 4096 {
+		err := reject("shell path exceeds 4096 bytes")
+		doneCb(Result{ExitCode: ExitRejected, Err: err})
+		return err
+	}
+	if err := s.budget.validate(s.Name, agent, cmdLine); err != nil {
+		doneCb(Result{ExitCode: ExitRejected, Err: err})
+		return err
+	}
+	job := &command{owner: owner, shell: shell, line: cmdLine, usePty: usePty, outputCb: outputCb, doneCb: doneCb, cost: len(shell) + len(cmdLine) + len(agent) + len(s.Name)}
 	if !owner.acquire(s) {
-		doneCb(ExitCancelled)
-		return
+		doneCb(Result{ExitCode: ExitCancelled})
+		return nil
 	}
 	s.mu.Lock()
-	if s.closed || owner.cancelled() {
+	if owner.cancelled() {
 		s.mu.Unlock()
 		s.finish(job, ExitCancelled)
-		return
+		return nil
 	}
+	var err error
+	if s.closed {
+		err = ErrSessionClosing
+	} else {
+		err = s.budget.acquire(s, owner, job.cost)
+	}
+	if err != nil {
+		s.mu.Unlock()
+		s.finishResult(job, Result{ExitCode: ExitRejected, Err: err})
+		return err
+	}
+	job.admitted = true
+	// Do not retain a small substring of an arbitrarily large caller buffer.
+	job.line = strings.Clone(cmdLine)
+	job.shell = strings.Clone(shell)
 	job.gen = s.gen
 	if agent != "" {
-		s.Agent = agent
+		s.Agent = strings.Clone(agent)
 	}
 	s.queue = append(s.queue, job)
 	s.ready.Signal()
 	s.mu.Unlock()
+	return nil
 }
 
 func (s *Session) WriteInput(data []byte) error {
@@ -342,21 +387,47 @@ type Manager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 	shell    string
+	budget   *admissionBudget
 }
 
 func NewManager(shell string) *Manager {
-	return &Manager{sessions: make(map[string]*Session), shell: shell}
+	m, _ := NewManagerWithLimits(shell, DefaultLimits())
+	return m
 }
 
+func NewManagerWithLimits(shell string, limits Limits) (*Manager, error) {
+	if err := limits.validate(); err != nil {
+		return nil, err
+	}
+	if len(shell) > 4096 {
+		return nil, fmt.Errorf("shell path exceeds 4096 bytes")
+	}
+	return &Manager{sessions: make(map[string]*Session), shell: strings.Clone(shell), budget: newBudget(limits)}, nil
+}
+
+// GetOrCreate returns nil on name/worker-limit rejection. New code should use
+// GetOrCreateChecked to obtain the precise admission error.
 func (m *Manager) GetOrCreate(name string) *Session {
+	s, _ := m.GetOrCreateChecked(name)
+	return s
+}
+
+func (m *Manager) GetOrCreateChecked(name string) (*Session, error) {
+	if err := m.budget.validate(name, "", ""); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s, ok := m.sessions[name]; ok {
-		return s
+		return s, nil
 	}
-	s := newSession(name)
+	if len(m.sessions) >= m.budget.limits.Sessions {
+		return nil, reject(fmt.Sprintf("manager named-session limit %d reached", m.budget.limits.Sessions))
+	}
+	name = strings.Clone(name)
+	s := newManagedSession(name, m.budget)
 	m.sessions[name] = s
-	return s
+	return s, nil
 }
 
 func (m *Manager) Get(name string) *Session {
@@ -365,20 +436,37 @@ func (m *Manager) Get(name string) *Session {
 	return m.sessions[name]
 }
 
-func (m *Manager) Execute(sessionName, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(int)) {
-	m.ExecuteOwned(nil, sessionName, cmdLine, usePty, agent, outputCb, doneCb)
+func (m *Manager) Execute(sessionName, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(int)) error {
+	return m.ExecuteOwned(nil, sessionName, cmdLine, usePty, agent, outputCb, doneCb)
 }
 
-// ExecuteOwned associates the job with a server-created connection lifetime.
-func (m *Manager) ExecuteOwned(owner *Owner, sessionName, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(int)) {
-	// A late submission from a dead connection must not create an idle session.
-	if owner.cancelled() {
-		doneCb(ExitCancelled)
-		return
-	}
-	s := m.GetOrCreate(sessionName)
-	s.execute(owner, m.shell, cmdLine, usePty, agent, outputCb, doneCb)
+// ExecuteOwned keeps the legacy exit-code callback and returns admission errors.
+// Exactly one callback is delivered even when the returned error is non-nil.
+func (m *Manager) ExecuteOwned(owner *Owner, sessionName, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(int)) error {
+	return m.Submit(owner, sessionName, cmdLine, usePty, agent, outputCb, func(r Result) { doneCb(r.ExitCode) })
 }
+
+// Submit is nonblocking admission. Result.Err supplies a deterministic rejection
+// reason for wire/API users; accepted jobs complete asynchronously as before.
+func (m *Manager) Submit(owner *Owner, sessionName, cmdLine string, usePty bool, agent string, outputCb ptyPkg.OutputCallback, doneCb func(Result)) error {
+	if owner.cancelled() {
+		doneCb(Result{ExitCode: ExitCancelled})
+		return nil
+	}
+	if err := m.budget.validate(sessionName, agent, cmdLine); err != nil {
+		doneCb(Result{ExitCode: ExitRejected, Err: err})
+		return err
+	}
+	s, err := m.GetOrCreateChecked(sessionName)
+	if err != nil {
+		doneCb(Result{ExitCode: ExitRejected, Err: err})
+		return err
+	}
+	return s.execute(owner, m.shell, cmdLine, usePty, agent, outputCb, doneCb)
+}
+
+// Limits returns a copy of the immutable admission policy.
+func (m *Manager) Limits() Limits { return m.budget.limits }
 
 func (m *Manager) WriteInput(sessionName string, data []byte) error {
 	s := m.Get(sessionName)
