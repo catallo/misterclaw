@@ -166,16 +166,21 @@ func (e *PipeExecutor) Start(shell string, cmdLine string, cb OutputCallback) er
 		return err
 	}
 
-	// Wait for process, capture exit code, then close pipe writer so reader gets EOF
+	// Wait() must not return before the last output callback finishes. Otherwise
+	// the server can send done=true ahead of stdout and clients lose that output.
+	outputDone := make(chan struct{})
 	go func() {
 		err := e.cmd.Wait()
 		e.result = exitCode(err)
-		close(e.waitCh)
 		pw.Close()
+		<-outputDone
+		close(e.waitCh)
 	}()
 
 	// Stream output
 	go func() {
+		defer close(outputDone)
+		defer pr.Close()
 		buf := make([]byte, 4096)
 		for {
 			n, err := pr.Read(buf)

@@ -12,8 +12,11 @@ import (
 )
 
 func startTestServer(t *testing.T) (string, *Server) {
+	return startTestServerWithManager(t, session.NewManager("/bin/sh"))
+}
+
+func startTestServerWithManager(t *testing.T, mgr *session.Manager) (string, *Server) {
 	t.Helper()
-	mgr := session.NewManager("/bin/sh")
 	srv := New(mgr)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
