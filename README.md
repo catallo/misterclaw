@@ -206,6 +206,29 @@ Three binaries:
 | `misterclaw-send` | Anywhere | CLI client for direct commands |
 | `misterclaw-mcp` | Your machine | MCP server — bridges AI agents to MiSTer |
 
+### Downloads and supported platforms
+
+Download executables from [GitHub Releases](https://github.com/catallo/misterclaw/releases), not from the source repository. The release workflow builds these targets:
+
+| Platform | Architecture | Downloads |
+|----------|--------------|-----------|
+| MiSTer | Linux ARMv7 | `misterclaw-linux-arm7` daemon |
+| Linux | x86-64, ARM64, ARMv7 | CLI and MCP server |
+| macOS | Intel x86-64, Apple Silicon ARM64 | CLI and MCP server |
+| Windows | x86-64 | CLI and MCP server (`.exe`) |
+
+Windows downloads are included starting with the next CI-generated release; older releases may not contain them. The daemon runs only on the MiSTer, not on Windows or macOS. On Linux/macOS, make the downloaded client executable with `chmod +x <filename>`.
+
+For Windows, use the downloaded executable in PowerShell, for example:
+
+```powershell
+.\misterclaw-send-windows-amd64.exe -H mister-fpga status
+```
+
+Point your MCP client's `command` to the absolute path of `misterclaw-mcp-windows-amd64.exe`; JSON paths must escape backslashes, for example `C:\\Tools\\misterclaw-mcp-windows-amd64.exe`.
+
+New CI-generated releases include `SHA256SUMS` and `build-metadata.json` recording the source commit, compiler version and target inventory. Branch/PR/manual CI runs produce preview artifacts only. Publishing requires a version-tag push from reviewed main history and passing tests; adding CI does not itself create a new release.
+
 ### Quick install on MiSTer
 
 ```bash

@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"net"
 	"testing"
+	"time"
 )
 
 func TestSubnetFromIP(t *testing.T) {
@@ -73,19 +77,50 @@ func TestDiscoveredServerStruct(t *testing.T) {
 	}
 }
 
-func TestDiscoverCommandExists(t *testing.T) {
-	// Verify the discover command is recognized by BuildRequest-style check
-	// (discover doesn't go through BuildRequest, but we verify cmdDiscover exists)
-	// This is a smoke test — cmdDiscover should not panic
-	// We can't fully test network scanning without a server, but we can verify
-	// the function is callable.
-	oldJSON := jsonFlag
-	jsonFlag = true
-	defer func() { jsonFlag = oldJSON }()
-
-	// cmdDiscover with no servers on network should succeed (prints empty JSON)
-	err := cmdDiscover()
-	if err != nil {
-		t.Errorf("cmdDiscover returned error: %v", err)
+// Discovery tests use loopback fixtures, never scan a developer or CI subnet.
+func TestDiscoverProbeLoopback(t *testing.T) {
+	for _, valid := range []bool{true, false} {
+		t.Run(fmt.Sprintf("valid=%t", valid), func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			done := make(chan error, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					done <- err
+					return
+				}
+				defer conn.Close()
+				conn.SetDeadline(time.Now().Add(2 * time.Second))
+				var request map[string]string
+				if err := json.NewDecoder(conn).Decode(&request); err != nil {
+					done <- err
+					return
+				}
+				if request["mister"] != "status" {
+					done <- fmt.Errorf("unexpected discovery request: %v", request)
+					return
+				}
+				response := map[string]string{"unrelated": "service"}
+				if valid {
+					response = map[string]string{"mister": "status", "core_name": "SNES_fixture"}
+				}
+				done <- json.NewEncoder(conn).Encode(response)
+			}()
+			port := listener.Addr().(*net.TCPAddr).Port
+			server, found := probeServer("127.0.0.1", port, 2*time.Second)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if found != valid {
+				t.Fatalf("found=%t, want %t", found, valid)
+			}
+			if valid && (server.Host != "127.0.0.1" || server.Port != port || server.Core != "SNES_fixture") {
+				t.Fatalf("unexpected discovery result: %+v", server)
+			}
+		})
 	}
 }

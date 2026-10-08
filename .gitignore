@@ -33,3 +33,8 @@ Thumbs.db
 /confstr_db.json
 community/
 build/
+release/
+/dist/
+/artifacts/
+__pycache__/
+*.py[cod]
