@@ -137,7 +137,7 @@ func TestList(t *testing.T) {
 
 func TestKillAndClose(t *testing.T) {
 	m := NewManager("/bin/sh")
-	m.GetOrCreate("to-close")
+	s := m.GetOrCreate("to-close")
 
 	if !m.Kill("to-close") {
 		// Kill on idle session is fine
@@ -148,7 +148,12 @@ func TestKillAndClose(t *testing.T) {
 	if m.Close("to-close") {
 		t.Error("Close returned true for already-closed session")
 	}
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("close did not complete")
+	}
 	if len(m.List()) != 0 {
-		t.Error("session still in list after close")
+		t.Error("session still in list after close completion")
 	}
 }
