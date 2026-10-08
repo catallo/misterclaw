@@ -225,8 +225,8 @@ func TestCloseRecreateAndOldOwnerCannotTouchNewSession(t *testing.T) {
 		t.Fatal("Close did not kill active")
 	}
 	select {
-	case <-s.done:
-	default:
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
 		t.Fatal("closed session worker leaked")
 	}
 	active = submitLifecycle(m, fresh, "reused", "printf ready; read -r line", false)

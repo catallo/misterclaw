@@ -181,6 +181,7 @@ func TestExplicitCloseCompletesActiveAndQueuedWithoutManagerDeadlock(t *testing.
 	peer.cmd(t, "active", "printf ready; read -r line")
 	peer.output(t, "ready")
 	peer.cmd(t, "queued", "printf must-not-run")
+	closingSession := mgr.Get("reconnect")
 	peer.send(t, map[string]interface{}{"close": true, "session": "reconnect"})
 	codes := map[string]float64{}
 	closed := false
@@ -196,6 +197,7 @@ func TestExplicitCloseCompletesActiveAndQueuedWithoutManagerDeadlock(t *testing.
 	if codes["active"] != -1 || codes["queued"] != -2 {
 		t.Fatalf("close completions: %v", codes)
 	}
+	awaitSignal(t, closingSession.Done(), "asynchronous close completion")
 	if mgr.Get("reconnect") != nil {
 		t.Fatal("closed session remains registered")
 	}

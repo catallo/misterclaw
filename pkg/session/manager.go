@@ -15,6 +15,7 @@ type Status string
 const (
 	StatusIdle    Status = "idle"
 	StatusRunning Status = "running"
+	StatusClosing Status = "closing"
 )
 
 // ExitCancelled is reported for commands cancelled before they start.
@@ -125,14 +126,15 @@ type Session struct {
 	closed   bool
 	gen      uint64
 	budget   *admissionBudget
+	onClosed func(*Session)
 }
 
 func newSession(name string) *Session {
-	return newManagedSession(name, newBudget(DefaultLimits()))
+	return newManagedSession(name, newBudget(DefaultLimits()), nil)
 }
 
-func newManagedSession(name string, budget *admissionBudget) *Session {
-	s := &Session{Name: name, status: StatusIdle, done: make(chan struct{}), budget: budget}
+func newManagedSession(name string, budget *admissionBudget, onClosed func(*Session)) *Session {
+	s := &Session{Name: name, status: StatusIdle, done: make(chan struct{}), budget: budget, onClosed: onClosed}
 	s.ready = sync.NewCond(&s.mu)
 	go s.processQueue()
 	return s
@@ -141,7 +143,16 @@ func newManagedSession(name string, budget *admissionBudget) *Session {
 // processQueue has one worker per name. Submission never blocks the TCP reader
 // on a full channel (which would prevent it from observing a disconnect).
 func (s *Session) processQueue() {
-	defer close(s.done)
+	defer func() {
+		// Process waits and completion callbacks have returned before this handoff.
+		// Output quiescence follows the executor's Wait contract (PR5 OutputDone).
+		// No session lock is held while the manager releases the name.
+		if s.onClosed != nil {
+			s.onClosed(s) // atomically publishes Done and releases the name
+		} else {
+			close(s.done)
+		}
+	}()
 	for {
 		s.mu.Lock()
 		for len(s.queue) == 0 && !s.closed {
@@ -358,28 +369,39 @@ func (s *Session) Drain() int {
 	return len(cancelled)
 }
 
-// Close stops active/queued work and wakes the idle worker. Completion is
-// delivered for every queued command instead of abandoning a closed channel.
-func (s *Session) Close() {
+// Close requests shutdown; it never joins the worker or invokes queued
+// callbacks on the caller's stack. Safe inside output/completion callbacks.
+// Done is the separate quiescence signal. Do not wait for Done inside a
+// callback of this same session: the worker must wait for that callback first.
+func (s *Session) Close() { s.requestClose() }
+
+func (s *Session) requestClose() bool {
 	s.mu.Lock()
-	s.closed = true
-	active := s.active != nil
-	s.ready.Broadcast()
-	s.mu.Unlock()
-	s.Drain()
-	// A completion callback runs on this worker after active was cleared.
-	// Waiting for the worker there would make callback -> Close deadlock.
-	// A closed idle worker cannot start another process; only active work
-	// needs to finish before the manager can release the session name.
-	if active {
-		<-s.done
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
 	}
+	s.closed = true
+	s.gen++
+	if s.executor != nil {
+		_ = s.executor.Kill()
+	}
+	s.ready.Broadcast()
+	return true
 }
+
+// Done closes only after the worker, its process wait and all completion
+// callbacks have returned, and its manager has released the reserved name.
+func (s *Session) Done() <-chan struct{} { return s.done }
 
 func (s *Session) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Info{Name: s.Name, Status: string(s.status), Agent: s.Agent, Pending: len(s.queue)}
+	status := s.status
+	if s.closed {
+		status = StatusClosing
+	}
+	return Info{Name: s.Name, Status: string(status), Agent: s.Agent, Pending: len(s.queue)}
 }
 
 // Manager manages named sessions.
@@ -417,15 +439,22 @@ func (m *Manager) GetOrCreateChecked(name string) (*Session, error) {
 		return nil, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if s, ok := m.sessions[name]; ok {
+		m.mu.Unlock()
+		s.mu.Lock()
+		closing := s.closed
+		s.mu.Unlock()
+		if closing {
+			return nil, ErrSessionClosing
+		}
 		return s, nil
 	}
+	defer m.mu.Unlock()
 	if len(m.sessions) >= m.budget.limits.Sessions {
 		return nil, reject(fmt.Sprintf("manager named-session limit %d reached", m.budget.limits.Sessions))
 	}
 	name = strings.Clone(name)
-	s := newManagedSession(name, m.budget)
+	s := newManagedSession(name, m.budget, m.releaseClosedSession)
 	m.sessions[name] = s
 	return s, nil
 }
@@ -501,29 +530,33 @@ func (m *Manager) Drain(sessionName string) int {
 	return s.Drain()
 }
 
+// Close accepts a shutdown request, not a synchronous join. The actual
+// Session remains reserved/closing until its Done signal; submissions to that
+// name are rejected (-3, ErrSessionClosing), never redirected to a new worker.
 func (m *Manager) Close(sessionName string) bool {
 	s := m.Get(sessionName)
-	if s == nil {
-		return false
-	}
-	// Mark the old worker closed and wait out any active process before
-	// releasing its name. Do not hold the manager lock while waiting:
-	// completion callbacks can call List or close an already-idle session.
-	s.Close()
+	return s != nil && s.requestClose()
+}
+
+func (m *Manager) releaseClosedSession(s *Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.sessions[sessionName] != s {
-		return false
+	if m.sessions[s.Name] == s {
+		delete(m.sessions, s.Name)
 	}
-	delete(m.sessions, sessionName)
-	return true
+	close(s.done) // no same-name GetOrCreate can interleave before Done
 }
 
 func (m *Manager) List() []Info {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	infos := make([]Info, 0, len(m.sessions))
+	snapshot := make([]*Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
+		snapshot = append(snapshot, s)
+	}
+	m.mu.RUnlock()
+	// Never hold the manager lock while waiting on a busy session's lock.
+	infos := make([]Info, 0, len(snapshot))
+	for _, s := range snapshot {
 		infos = append(infos, s.Info())
 	}
 	return infos

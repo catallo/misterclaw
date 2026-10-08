@@ -12,7 +12,7 @@ const ExitRejected = -3
 
 var (
 	ErrAdmission      = errors.New("command admission rejected")
-	ErrSessionClosing = errors.New("session is closing; wait for Session.Done before reusing its name")
+	ErrSessionClosing = errors.New("session is closing; retry after shutdown completion")
 )
 
 // Limits bound retained active+queued jobs, their command/metadata string bytes,

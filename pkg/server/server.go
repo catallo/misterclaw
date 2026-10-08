@@ -270,7 +270,8 @@ func (s *Server) handleClose(req Request, send func(interface{})) {
 	send(map[string]interface{}{
 		"close":   true,
 		"session": req.Session,
-		"success": success,
+		"success": success, // shutdown request accepted, not a synchronous join
+		"closing": success,
 	})
 }
 
