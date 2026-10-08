@@ -227,7 +227,7 @@ For Windows, use the downloaded executable in PowerShell, for example:
 
 Point your MCP client's `command` to the absolute path of `misterclaw-mcp-windows-amd64.exe`; JSON paths must escape backslashes, for example `C:\\Tools\\misterclaw-mcp-windows-amd64.exe`.
 
-New CI-generated releases include `SHA256SUMS` and `build-metadata.json` recording the source commit, compiler version and target inventory. Branch/PR/manual CI runs produce preview artifacts only. Publishing requires a version-tag push from reviewed main history and passing tests; adding CI does not itself create a new release.
+New CI-generated releases include `SHA256SUMS` and `build-metadata.json` recording the source commit, compiler version and target inventory. Branch/PR/manual CI runs produce preview artifacts only. Publishing requires a version-tag push from main history and passing tests; maintainers must check release and licensing readiness before pushing a tag. Main ancestry is not itself proof of review approval. Adding CI does not create a new release.
 
 ### Quick install on MiSTer
 

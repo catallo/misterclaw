@@ -74,6 +74,21 @@ class ReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Wrong build provenance'):
             self.assemble()
 
+    def test_missing_or_empty_compiler_version(self):
+        file = self.source / 'darwin-amd64' / 'build-info-darwin-amd64.json'
+        original = json.loads(file.read_text())
+        for value in (None, '', '   ', 123):
+            with self.subTest(value=value):
+                data = dict(original, go_version=value)
+                file.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, 'Missing compiler version'):
+                    self.assemble()
+                self.assertFalse(self.output.exists())
+        original.pop('go_version')
+        file.write_text(json.dumps(original))
+        with self.assertRaisesRegex(ValueError, 'Missing compiler version'):
+            self.assemble()
+
     def test_symlink_artifact(self):
         (self.source / 'unexpected-link').symlink_to(self.source / 'linux-amd64')
         with self.assertRaisesRegex(ValueError, 'Symlink artifact'):

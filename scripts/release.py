@@ -85,6 +85,8 @@ def assemble(source, output, commit):
         metadata = json.loads(files[f'build-info-{suffix(target)}.json'].read_text(encoding='utf-8'))
         if metadata['target'] != list(target) or metadata['source_commit'] != commit:
             raise ValueError(f'Wrong build provenance: {target}')
+        if not isinstance(metadata.get('go_version'), str) or not metadata['go_version'].strip():
+            raise ValueError(f'Missing compiler version: {target}')
         if set(metadata['sha256']) != set(binary_names(target)):
             raise ValueError(f'Wrong build inventory: {target}')
         for name in binary_names(target):
