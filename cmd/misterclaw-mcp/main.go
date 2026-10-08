@@ -550,36 +550,7 @@ func sendShellCommand(command string) (string, int, error) {
 		return "", 1, fmt.Errorf("sending request: %w", err)
 	}
 
-	var output strings.Builder
-	exitCode := 0
-	dec := json.NewDecoder(conn)
-
-	for {
-		conn.SetDeadline(time.Now().Add(30 * time.Second))
-		var resp map[string]interface{}
-		if err := dec.Decode(&resp); err != nil {
-			// JSON decode failure often means binary data in output corrupted the response.
-			// Return partial output with a warning instead of failing silently.
-			if output.Len() > 0 {
-				output.WriteString("\n[warning: output may be truncated due to binary data - use hexdump for binary files]")
-			}
-			break
-		}
-		if data, ok := resp["data"].(string); ok {
-			output.WriteString(data)
-		}
-		if done, ok := resp["done"].(bool); ok && done {
-			if code, ok := resp["exit_code"].(float64); ok {
-				exitCode = int(code)
-			}
-			break
-		}
-		if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
-			return "", 1, fmt.Errorf("%s", errMsg)
-		}
-	}
-
-	return output.String(), exitCode, nil
+	return readShellOutput(conn, 30*time.Second)
 }
 
 // Tool execution helpers
@@ -623,32 +594,18 @@ func doScreenshot() MCPToolResult {
 
 func doShellCommand(command string) MCPToolResult {
 	output, exitCode, err := sendShellCommand(command)
-	if err != nil {
-		return errorResult(err.Error())
-	}
-
-	// Sanitize output: strip non-printable characters to prevent JSON corruption
+	// Sanitize only the MCP text presentation, never the daemon's raw stream.
 	text := sanitizeShellOutput(output)
+	if err != nil {
+		if text != "" {
+			text += "\n"
+		}
+		return errorResult(text + "[shell error: " + err.Error() + "]")
+	}
 	if exitCode != 0 {
 		text += fmt.Sprintf("\n[exit code: %d]", exitCode)
 	}
 	return textResult(text)
-}
-
-// sanitizeShellOutput removes non-printable characters that would corrupt JSON.
-// Keeps printable ASCII, tabs, newlines, and carriage returns.
-func sanitizeShellOutput(s string) string {
-	var buf strings.Builder
-	for _, r := range s {
-		if (r >= 32 && r <= 126) || r == '\t' || r == '\n' || r == '\r' {
-			buf.WriteRune(r)
-		} else if r > 127 {
-			// Allow valid UTF-8 but replace replacement char
-			buf.WriteRune(r)
-		}
-		// Drop control chars (0-31 except tab/newline/CR) and DEL (127)
-	}
-	return buf.String()
 }
 
 // Response formatters

@@ -370,7 +370,9 @@ func (s *Server) handleCmd(req Request, send func(interface{})) {
 		send(map[string]interface{}{
 			"id":     id,
 			"stream": "stdout",
-			"data":   sanitizeOutput(string(data)),
+			// JSON encoding escapes control characters; preserve raw shell data
+			// for protocol clients, including ANSI sequences and NUL delimiters.
+			"data": string(data),
 		})
 	}
 
@@ -1163,17 +1165,4 @@ func (s *Server) handleCFGWrite(req Request, send func(interface{})) {
 		"success": false,
 		"error":   fmt.Sprintf("option not found: %s (checked CONF_STR options and DIP switches)", req.Option),
 	})
-}
-
-// sanitizeOutput removes non-printable characters that would corrupt JSON.
-// Keeps printable ASCII, tabs, newlines, carriage returns, and valid UTF-8.
-func sanitizeOutput(s string) string {
-	var buf strings.Builder
-	for _, r := range s {
-		if (r >= 32 && r <= 126) || r == '\t' || r == '\n' || r == '\r' || r > 127 {
-			buf.WriteRune(r)
-		}
-		// Drop control chars (0-31 except tab/newline/CR) and DEL (127)
-	}
-	return buf.String()
 }
