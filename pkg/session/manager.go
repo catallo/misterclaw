@@ -133,9 +133,16 @@ func newSession(name string) *Session {
 	return newManagedSession(name, newBudget(DefaultLimits()), nil)
 }
 
-func newManagedSession(name string, budget *admissionBudget, onClosed func(*Session)) *Session {
+// newSessionState has no worker and is not registered anywhere. Submit uses
+// it as a private admission candidate; rejected candidates can be discarded.
+func newSessionState(name string, budget *admissionBudget, onClosed func(*Session)) *Session {
 	s := &Session{Name: name, status: StatusIdle, done: make(chan struct{}), budget: budget, onClosed: onClosed}
 	s.ready = sync.NewCond(&s.mu)
+	return s
+}
+
+func newManagedSession(name string, budget *admissionBudget, onClosed func(*Session)) *Session {
+	s := newSessionState(name, budget, onClosed)
 	go s.processQueue()
 	return s
 }
@@ -486,12 +493,62 @@ func (m *Manager) Submit(owner *Owner, sessionName, cmdLine string, usePty bool,
 		doneCb(Result{ExitCode: ExitRejected, Err: err})
 		return err
 	}
-	s, err := m.GetOrCreateChecked(sessionName)
-	if err != nil {
+	// Existing sessions are never rolled back: they can contain other work or
+	// a closing reservation. Their per-session path performs final admission.
+	m.mu.Lock()
+	if s := m.sessions[sessionName]; s != nil {
+		m.mu.Unlock()
+		return s.execute(owner, m.shell, cmdLine, usePty, agent, outputCb, doneCb)
+	}
+	if len(m.sessions) >= m.budget.limits.Sessions {
+		m.mu.Unlock()
+		err := reject(fmt.Sprintf("manager named-session limit %d reached", m.budget.limits.Sessions))
 		doneCb(Result{ExitCode: ExitRejected, Err: err})
 		return err
 	}
-	return s.execute(owner, m.shell, cmdLine, usePty, agent, outputCb, doneCb)
+
+	// New-name transaction: registry -> owner -> budget. Owner.Close drops
+	// its lock before touching sessions; finish drops budget before owner.
+	// No reverse lock dependency, process start, or callback runs here.
+	if owner != nil {
+		owner.mu.Lock()
+	}
+	if owner.cancelled() {
+		if owner != nil {
+			owner.mu.Unlock()
+		}
+		m.mu.Unlock()
+		doneCb(Result{ExitCode: ExitCancelled})
+		return nil
+	}
+	name := strings.Clone(sessionName)
+	s := newSessionState(name, m.budget, m.releaseClosedSession)
+	cost := len(m.shell) + len(cmdLine) + len(agent) + len(name)
+	if err := m.budget.acquire(s, owner, cost); err != nil {
+		// Nothing was published, registered, or started. acquire either
+		// reserves every counter atomically or changes no budget at all.
+		if owner != nil {
+			owner.mu.Unlock()
+		}
+		m.mu.Unlock()
+		doneCb(Result{ExitCode: ExitRejected, Err: err})
+		return err
+	}
+	job := &command{owner: owner, shell: strings.Clone(m.shell), line: strings.Clone(cmdLine), usePty: usePty, outputCb: outputCb, doneCb: doneCb, cost: cost, admitted: true}
+	s.Agent = strings.Clone(agent)
+	s.queue = []*command{job}
+	if owner != nil {
+		owner.sessions[s]++
+	}
+	m.sessions[name] = s
+	if owner != nil {
+		owner.mu.Unlock()
+	}
+	m.mu.Unlock()
+	// Publication is complete before any execution/callback. A racing Close
+	// or Owner.Close can cancel the preloaded queue even before this starts.
+	go s.processQueue()
+	return nil
 }
 
 // Limits returns a copy of the immutable admission policy.

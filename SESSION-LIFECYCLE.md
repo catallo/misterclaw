@@ -54,6 +54,34 @@ policy. Zero/negative limits are invalid, never an unlimited escape hatch.
 name/worker/closing rejection errors; legacy `GetOrCreate` returns nil on
 those rejections. Client protocol cannot change limits or choose an owner.
 
+## Transactional new-name submission
+
+`Submit` does not call the explicit `GetOrCreate` API before admission.
+For a new name it creates an unpublished session state **without a worker**.
+Under registry -> owner -> budget synchronization it reserves all count/byte
+credits, registers the owner and preloads the first job, then publishes the
+name. Only after releasing these locks is the worker started. If admission
+or owner lifetime rejects the request, no worker/name/owner registration or
+budget credit is published or retained. This is a final atomic decision,
+not a racy preflight check followed by unconditional worker creation.
+
+Existing and closing sessions use their actual existing object and are never
+removed as rejection rollback. Explicit `GetOrCreateChecked`/`GetOrCreate`
+remain deliberate idle-name reservation APIs, even without a job. Successfully
+admitted names also retain their documented idle metadata after completion,
+start failure or later owner cancellation. A **never-admitted Submit** cannot
+consume that retention policy or lock out unrelated future connections.
+
+The transaction invokes no callbacks/process operations under its locks.
+Owner.Close drops its owner lock before accessing sessions; job completion
+releases budget before owner registration. Existing-session admission stays
+per-session and does not hold the registry during process start or execution.
+Tests saturate the default owner budget with 128 jobs in two names, reject
+126 new names without creating slots, and then admit a foreign new name.
+Parallel exhausted owner/manager probes, partial mixed admission, and owner
+end/publication races verify that only admitted or explicitly reserved names
+remain and counters/callbacks are consistent.
+
 Credits are retained during process startup/execution/output wait, then
 released before the completion callback. Payload references are dropped
 before credits are returned. Queue cancellation, drain, start failure,
@@ -70,7 +98,26 @@ after that entry has disappeared, the slot is reusable. Tests fill all 128
 default slots with completed short-lived owners, verify explicit rejection,
 verify existing-name work, and recover capacity through Close/Done. Separate
 start-failure and real-TCP operator-Close tests cover the same policy. This
-availability trade-off is explicit, not an automatic retention fix.
+availability trade-off is explicit, not an automatic retention fix, and is
+**not generally approved for deployment** merely because it is documented.
+
+Operational options requiring an explicit choice before deployment:
+
+1. Keep a small, stable session-name set, as the standard `misterclaw-cli`
+   and `mcp` clients do. This avoids name churn but is not a blanket guarantee
+   for unrelated clients or existing retained names.
+2. For one-name-per-command administrative transports, explicitly Close each
+   actually admitted own name and await Done/list disappearance, including
+   error/cancellation cleanup. Do not close someone else's sessions. The
+   currently used administrative transport has not been changed by this fix.
+3. Separately decide/configure a larger named-slot bound within device memory
+   limits, or design an approved safe idle eviction/TTL policy. Neither is
+   silently enabled here.
+
+This transactional fix only prevents **rejected-only** names from consuming
+slots. Successful/explicit names still need one of the above accepted
+operational policies; low throughput alone does not prevent the 129th-name
+rejection.
 
 The previous block-on-full 64-entry channel is **not** restored. TCP can
 continue to list/drain/read EOF while full admission is rejected. Socket
