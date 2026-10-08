@@ -91,6 +91,10 @@ func LoadCore(path string) error {
 // task #18's "0-byte RBF install". Guard by existence, type, extension, and
 // (for .rbf) a sane minimum size.
 func ValidateCorePath(path string) error {
+	// The command FIFO is newline-delimited; a filename must not add commands.
+	if strings.ContainsAny(path, "\r\n\x00") {
+		return fmt.Errorf("core path contains a command delimiter")
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -100,6 +104,9 @@ func ValidateCorePath(path string) error {
 	}
 	if info.IsDir() {
 		return fmt.Errorf("core path is a directory, not a core file: %s", path)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("core path is not a regular file: %s", path)
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".rbf":

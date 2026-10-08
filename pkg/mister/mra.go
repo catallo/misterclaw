@@ -10,8 +10,10 @@ import (
 
 // MRA represents the top-level <misterromdescription> element of an MRA file.
 type MRA struct {
-	XMLName  xml.Name     `xml:"misterromdescription"`
-	SetName  string       `xml:"setname"`
+	XMLName  xml.Name      `xml:"misterromdescription"`
+	Name     string        `xml:"name"`
+	RBF      string        `xml:"rbf"`
+	SetName  string        `xml:"setname"`
 	Switches []MRASwitches `xml:"switches"`
 }
 
