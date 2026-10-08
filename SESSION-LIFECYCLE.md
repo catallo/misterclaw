@@ -135,6 +135,16 @@ called directly inside OutputCallback or CompletionCallback.
   kills its active executor under its per-session lock, and wakes the worker.
 - The original worker still waits for its executor and delivers every queued
   cancellation/completion. Existing executor waits/watchdog are retained.
+- Every admitted job reserves a separate completion-lifetime token at the
+  same synchronized admission/publication point as its queue entry. This
+  token remains until its Completion callback actually returns, even when
+  external Drain or Owner.Close extracts the job and invokes that callback
+  outside the worker. Job/byte/owner credits still become reusable before
+  the callback; they are not the shutdown-quiescence counter.
+- A closed worker with an empty queue waits on its session Cond until all
+  admitted-job completion tokens have returned. Queue extraction does not
+  create a late registration window. Close itself never joins callbacks;
+  callbacks run outside locks and signal token return afterwards.
 - Until that worker's handoff, the actual object remains registered as
   `closing`. Same-name submissions get `-3`/`ErrSessionClosing`; no second
   process/worker can execute under that name.

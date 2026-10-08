@@ -114,19 +114,20 @@ type command struct {
 
 // Session represents a named execution context with sequential command execution.
 type Session struct {
-	Name     string
-	Agent    string
-	status   Status
-	executor ptyPkg.Executor
-	active   *command
-	mu       sync.Mutex
-	ready    *sync.Cond
-	queue    []*command
-	done     chan struct{} // closed when the worker exits
-	closed   bool
-	gen      uint64
-	budget   *admissionBudget
-	onClosed func(*Session)
+	Name        string
+	Agent       string
+	status      Status
+	executor    ptyPkg.Executor
+	active      *command
+	mu          sync.Mutex
+	ready       *sync.Cond
+	queue       []*command
+	uncompleted int           // admitted jobs whose Completion callback has not returned
+	done        chan struct{} // closed when the worker exits
+	closed      bool
+	gen         uint64
+	budget      *admissionBudget
+	onClosed    func(*Session)
 }
 
 func newSession(name string) *Session {
@@ -166,6 +167,12 @@ func (s *Session) processQueue() {
 			s.ready.Wait()
 		}
 		if len(s.queue) == 0 && s.closed {
+			// Drain/drainOwner can run admitted-job completions outside this
+			// worker. Their lifetime was reserved at admission, before any
+			// queue extraction or Close can race with this shutdown check.
+			for s.uncompleted != 0 {
+				s.ready.Wait()
+			}
 			s.mu.Unlock()
 			return
 		}
@@ -190,11 +197,22 @@ func (s *Session) finishResult(job *command, result Result) {
 	// a completion callback chains submissions or blocks on external work.
 	job.line, job.shell, job.outputCb, job.doneCb = "", "", nil, nil
 	if job.admitted {
+		// Budget/owner credits are reusable before the user callback, as
+		// before. Its separate session-lifetime reservation ends only after
+		// the callback actually returns, including externally drained jobs.
+		defer s.completionReturned()
 		s.budget.release(s, job.owner, job.cost)
 		job.admitted = false
 	}
 	job.owner.release(s)
 	callback(result)
+}
+
+func (s *Session) completionReturned() {
+	s.mu.Lock()
+	s.uncompleted--
+	s.ready.Broadcast()
+	s.mu.Unlock()
 }
 
 func (s *Session) run(job *command) {
@@ -289,6 +307,7 @@ func (s *Session) execute(owner *Owner, shell, cmdLine string, usePty bool, agen
 		return err
 	}
 	job.admitted = true
+	s.uncompleted++
 	// Do not retain a small substring of an arbitrarily large caller buffer.
 	job.line = strings.Clone(cmdLine)
 	job.shell = strings.Clone(shell)
@@ -537,6 +556,7 @@ func (m *Manager) Submit(owner *Owner, sessionName, cmdLine string, usePty bool,
 	job := &command{owner: owner, shell: strings.Clone(m.shell), line: strings.Clone(cmdLine), usePty: usePty, outputCb: outputCb, doneCb: doneCb, cost: cost, admitted: true}
 	s.Agent = strings.Clone(agent)
 	s.queue = []*command{job}
+	s.uncompleted = 1 // part of the unpublished admission transaction
 	if owner != nil {
 		owner.sessions[s]++
 	}
