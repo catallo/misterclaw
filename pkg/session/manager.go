@@ -318,10 +318,17 @@ func (s *Session) Drain() int {
 func (s *Session) Close() {
 	s.mu.Lock()
 	s.closed = true
+	active := s.active != nil
 	s.ready.Broadcast()
 	s.mu.Unlock()
 	s.Drain()
-	<-s.done
+	// A completion callback runs on this worker after active was cleared.
+	// Waiting for the worker there would make callback -> Close deadlock.
+	// A closed idle worker cannot start another process; only active work
+	// needs to finish before the manager can release the session name.
+	if active {
+		<-s.done
+	}
 }
 
 func (s *Session) Info() Info {
@@ -411,8 +418,9 @@ func (m *Manager) Close(sessionName string) bool {
 	if s == nil {
 		return false
 	}
-	// Keep the same name reserved until the old worker exits; do not hold the
-	// manager lock while waiting, since completion callbacks can call List.
+	// Mark the old worker closed and wait out any active process before
+	// releasing its name. Do not hold the manager lock while waiting:
+	// completion callbacks can call List or close an already-idle session.
 	s.Close()
 	m.mu.Lock()
 	defer m.mu.Unlock()

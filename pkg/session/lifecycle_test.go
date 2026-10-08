@@ -256,6 +256,31 @@ func TestOwnerRegistrationsReleasedOnStartFailureAndLateSubmission(t *testing.T)
 	}
 }
 
+func TestCompletionCallbackCanCloseItsOwnSession(t *testing.T) {
+	m := NewManager("/bin/sh")
+	s := m.GetOrCreate("callback-close")
+	closed := make(chan bool, 1)
+	m.Execute("callback-close", "exit 7", false, "", func([]byte) {}, func(code int) {
+		closed <- code == 7 && m.Close("callback-close")
+	})
+	select {
+	case success := <-closed:
+		if !success {
+			t.Fatal("completion callback did not close its session")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("completion callback -> Close deadlocked on its own worker")
+	}
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("closed callback worker leaked")
+	}
+	if m.Get("callback-close") != nil {
+		t.Fatal("closed callback session remains registered")
+	}
+}
+
 func TestOwnerDisconnectKillsOrdinaryProcessGroupChildren(t *testing.T) {
 	m := NewManager("/bin/sh")
 	defer m.Close("tree")
