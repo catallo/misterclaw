@@ -2,13 +2,15 @@
 
 MiSTerClaw is the first MCP server for MiSTer-FPGA. Control your MiSTer from any AI agent.
 
-![Version](https://img.shields.io/badge/Source_version-v0.8.0-blue)
-
-Source version: **v0.8.0**. This includes Arcade indexing/launch, corrected shell output and session lifecycle, and the PTY completion fix. A source version or installed build is not a published release; download availability is listed separately under [GitHub Releases](https://github.com/catallo/misterclaw/releases).
+![Version](https://img.shields.io/badge/Version-v0.8.0-blue)
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-ARMv7_(DE10--Nano)-blue)
-[![MiSTerClaw on Glama](https://glama.ai/mcp/servers/catallo/misterclaw/badges/score.svg)](https://glama.ai/mcp/servers/catallo/misterclaw) (badge suggestion: thanks, [punkpeye](https://github.com/punkpeye))
+[![MiSTerClaw on Glama](https://glama.ai/mcp/servers/catallo/misterclaw/badges/score.svg)](https://glama.ai/mcp/servers/catallo/misterclaw)
+
+(Badge suggestion: thanks, [punkpeye](https://github.com/punkpeye).)
+
+**v0.8.0** includes Arcade indexing/launch, corrected shell output and session lifecycle, and the PTY completion fix. See [GitHub Releases](https://github.com/catallo/misterclaw/releases) for downloads and checksums.
 
 ## What is this?
 
@@ -220,7 +222,7 @@ Download executables from [GitHub Releases](https://github.com/catallo/mistercla
 | macOS | Intel x86-64, Apple Silicon ARM64 | CLI and MCP server |
 | Windows | x86-64 | CLI and MCP server (`.exe`) |
 
-Windows downloads are included starting with the next CI-generated release; older releases may not contain them. The daemon runs only on the MiSTer, not on Windows or macOS. On Linux/macOS, make the downloaded client executable with `chmod +x <filename>`.
+Windows downloads are included in v0.8.0 and newer; older releases may not contain them. The daemon runs only on the MiSTer, not on Windows or macOS. On Linux/macOS, make the downloaded client executable with `chmod +x <filename>`.
 
 For Windows, use the downloaded executable in PowerShell, for example:
 
