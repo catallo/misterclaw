@@ -8,6 +8,7 @@ Source version: **v0.8.0**. This includes Arcade indexing/launch, corrected shel
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-ARMv7_(DE10--Nano)-blue)
+[![MiSTerClaw on Glama](https://glama.ai/mcp/servers/catallo/misterclaw/badges/score.svg)](https://glama.ai/mcp/servers/catallo/misterclaw)
 
 ## What is this?
 
