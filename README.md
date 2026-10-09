@@ -8,7 +8,7 @@ Source version: **v0.8.0**. This includes Arcade indexing/launch, corrected shel
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-ARMv7_(DE10--Nano)-blue)
-[![MiSTerClaw on Glama](https://glama.ai/mcp/servers/catallo/misterclaw/badges/score.svg)](https://glama.ai/mcp/servers/catallo/misterclaw)
+[![MiSTerClaw on Glama](https://glama.ai/mcp/servers/catallo/misterclaw/badges/score.svg)](https://glama.ai/mcp/servers/catallo/misterclaw) (badge suggestion: thanks, [punkpeye](https://github.com/punkpeye))
 
 ## What is this?
 
@@ -16,7 +16,7 @@ MiSTerClaw lets AI agents — Claude, ChatGPT, OpenClaw, Hermes, Cursor, and oth
 
 ## Arcade games
 
-Arcade games are indexed from `.mra` descriptors and launched directly; they are
+Arcade games are indexed from `.mra` descriptors and launched directly (initial support: thanks, [stt](https://github.com/stt)); they are
 not represented by the MAME ZIP folder or a single system-wide RBF. Recursive
 canonical folders and `_alternatives` are supported on SD and USB. Generated
 `_Organized` views are omitted when canonical descriptors exist in the same
@@ -82,7 +82,7 @@ Add MiSTerClaw to your MCP client config:
 | `mister_system_info` | Get system config, notes, and OSD menu for a system |
 | `mister_rescan` | Rescan ROM library (optionally for specific drive) |
 | `mister_tailscale` | Manage Tailscale VPN |
-| `mister_shell` | Execute shell commands |
+| `mister_shell` | Execute shell commands (initial output-handling fix: thanks, [stt](https://github.com/stt)) |
 
 ## Example Conversations
 
@@ -230,7 +230,7 @@ For Windows, use the downloaded executable in PowerShell, for example:
 
 Point your MCP client's `command` to the absolute path of `misterclaw-mcp-windows-amd64.exe`; JSON paths must escape backslashes, for example `C:\\Tools\\misterclaw-mcp-windows-amd64.exe`.
 
-New CI-generated releases include `SHA256SUMS` and `build-metadata.json` recording the source commit, compiler version and target inventory. Branch/PR/manual CI runs produce preview artifacts only. Publishing requires a version-tag push from main history and passing tests; maintainers must check release and licensing readiness before pushing a tag. Main ancestry is not itself proof of review approval. Adding CI does not create a new release.
+The release workflow builds tagged releases (initial workflow: thanks, [stt](https://github.com/stt)). New CI-generated releases include `SHA256SUMS` and `build-metadata.json` recording the source commit, compiler version and target inventory. Branch/PR/manual CI runs produce preview artifacts only. Publishing requires a version-tag push from main history and passing tests; maintainers must check release and licensing readiness before pushing a tag. Main ancestry is not itself proof of review approval. Adding CI does not create a new release.
 
 ### Quick install on MiSTer
 
