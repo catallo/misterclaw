@@ -204,19 +204,31 @@ func (e *PtyExecutor) Resize(cols, rows uint16) error {
 // Kill requests cancellation only; it never joins the output callback.
 func (e *PtyExecutor) Kill() error {
 	e.mu.Lock()
-	cmd, pid, started, childDone := e.cmd, e.pid, e.started, e.childDone
+	cmd, pid, started, waitCh := e.cmd, e.pid, e.started, e.waitCh
 	e.mu.Unlock()
 	if !started || cmd.Process == nil {
 		return nil
 	}
 	select {
-	case <-childDone:
-		// Do not signal a reaped process group using a potentially reused PID.
+	case <-waitCh:
 		return nil
 	default:
 	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
-	return cmd.Process.Signal(syscall.SIGKILL)
+	// Preserve cancellation of same-group descendants during pending drain.
+	// Numeric process-group IDs retain the historical identifier-reuse limit;
+	// this is a best-effort cancellation request, not strong group ownership.
+	groupErr := syscall.Kill(-pid, syscall.SIGKILL)
+	directErr := cmd.Process.Signal(syscall.SIGKILL)
+	if groupErr == nil {
+		return nil
+	}
+	if errors.Is(directErr, os.ErrProcessDone) {
+		if errors.Is(groupErr, syscall.ESRCH) {
+			return nil
+		}
+		return groupErr
+	}
+	return directErr
 }
 
 func (e *PtyExecutor) Wait() (int, error) {
