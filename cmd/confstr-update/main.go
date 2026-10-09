@@ -14,10 +14,11 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/catallo/misterclaw/internal/version"
 	"github.com/catallo/misterclaw/pkg/mister"
 )
 
-const Version = "0.2.0"
+const Version = version.Current
 
 // GitHub API types
 
@@ -38,22 +39,22 @@ type ghContent struct {
 
 // Repos to skip — these are infrastructure, not FPGA cores.
 var skipRepos = map[string]bool{
-	"Main_MiSTer":         true,
-	"Distribution_MiSTer": true,
-	"Downloader_MiSTer":   true,
-	"Menu_MiSTer":         true,
-	"Hardware_MiSTer":     true,
-	"Wiki_MiSTer":         true,
-	"Setup_MiSTer":        true,
-	"Updater_MiSTer":      true,
-	"Filters_MiSTer":      true,
-	"Presets_MiSTer":      true,
-	"Scripts_MiSTer":      true,
-	"Template_MiSTer":     true,
-	"MkDocs_MiSTer":       true,
-	"mr-fusion":           true,
-	"Linux-Kernel_MiSTer": true,
-	"Quartus_Compile":     true,
+	"Main_MiSTer":               true,
+	"Distribution_MiSTer":       true,
+	"Downloader_MiSTer":         true,
+	"Menu_MiSTer":               true,
+	"Hardware_MiSTer":           true,
+	"Wiki_MiSTer":               true,
+	"Setup_MiSTer":              true,
+	"Updater_MiSTer":            true,
+	"Filters_MiSTer":            true,
+	"Presets_MiSTer":            true,
+	"Scripts_MiSTer":            true,
+	"Template_MiSTer":           true,
+	"MkDocs_MiSTer":             true,
+	"mr-fusion":                 true,
+	"Linux-Kernel_MiSTer":       true,
+	"Quartus_Compile":           true,
 	"SD-Installer-Win64_MiSTer": true,
 	"Fonts_MiSTer":              true,
 	"Gamecontrollerdb_MiSTer":   true,
@@ -66,6 +67,7 @@ var theypsilonCoreRepos = []string{
 	"Arcade-TMNT_MiSTer",
 	"CoCo3_MiSTer",
 }
+
 // va7deo repos — Toaplan, SNK68, Alpha68k, etc. (Coin-Op Collection source)
 var va7deoCoreRepos = []string{
 	"zerowing",
@@ -85,7 +87,6 @@ var va7deoCoreRepos = []string{
 var zakk4223CoreRepos = []string{
 	"Arcade-Raizing_MiSTer",
 }
-
 
 func main() {
 	output := flag.String("output", "confstr_db.json", "Output JSON file path")

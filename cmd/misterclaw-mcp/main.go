@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/catallo/misterclaw/internal/version"
 )
 
 var (
@@ -58,7 +60,12 @@ type MCPToolResult struct {
 func main() {
 	flag.StringVar(&host, "host", "mister-fpga", "MiSTer-FPGA host")
 	flag.IntVar(&port, "port", 9900, "MiSTer-FPGA port")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+	if *versionFlag {
+		fmt.Printf("misterclaw-mcp v%s\n", version.Current)
+		return
+	}
 
 	log.SetOutput(os.Stderr)
 	log.SetPrefix("[misterclaw-mcp] ")
@@ -105,7 +112,7 @@ func handleRequest(req JSONRPCRequest) *JSONRPCResponse {
 				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 				"serverInfo": map[string]interface{}{
 					"name":    "misterclaw-mcp",
-					"version": "0.1.0",
+					"version": version.Current,
 				},
 			},
 		}
