@@ -8,12 +8,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/catallo/misterclaw/internal/version"
 	"github.com/catallo/misterclaw/pkg/mister"
 	"github.com/catallo/misterclaw/pkg/server"
 	"github.com/catallo/misterclaw/pkg/session"
 )
 
-const Version = "0.1.0"
+const Version = version.Current
 
 func main() {
 	port := flag.Int("port", 9900, "TCP port to listen on")
@@ -42,7 +43,7 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("[misterclaw] ")
 
-	log.Printf("starting misterclaw on %s:%d (shell: %s)", *host, *port, *shell)
+	log.Printf("starting misterclaw v%s on %s:%d (shell: %s)", Version, *host, *port, *shell)
 
 	// Start background system discovery (scans ROM folders, cores, extensions)
 	mister.StartDiscovery()

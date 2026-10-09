@@ -15,9 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/catallo/misterclaw/internal/version"
 )
 
-const Version = "0.1.0"
+const Version = version.Current
 
 // Global flags
 var (
@@ -1391,7 +1393,6 @@ AGENT NOTES:
   - Tailscale setup is fully automated: setup → auth URL → poll → IP returned
 `)
 }
-
 
 // stripGlobalFlags removes global flags (--json, -j, --timeout, -t) from subcommand args.
 // This handles the case where users place global flags after the subcommand name.
