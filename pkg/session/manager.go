@@ -241,22 +241,26 @@ func (s *Session) run(job *command) {
 	s.status = StatusRunning
 	s.mu.Unlock()
 
-	// Retain the existing queue watchdog and executor output semantics.
-	waitCh := make(chan int, 1)
-	go func() { code, _ := exec.Wait(); waitCh <- code }()
+	// Retain the existing watchdog durations. Executor drain errors must reach
+	// the existing completion error field instead of silently claiming success.
+	waitCh := make(chan Result, 1)
+	go func() {
+		code, err := exec.Wait()
+		waitCh <- Result{ExitCode: code, Err: err}
+	}()
 	timer := time.NewTimer(10 * time.Minute)
-	var exitCode int
+	var result Result
 	select {
-	case exitCode = <-waitCh:
+	case result = <-waitCh:
 	case <-timer.C:
 		s.mu.Lock()
 		_ = exec.Kill()
 		s.mu.Unlock()
 		grace := time.NewTimer(10 * time.Second)
 		select {
-		case exitCode = <-waitCh:
+		case result = <-waitCh:
 		case <-grace.C:
-			exitCode = -1
+			result = Result{ExitCode: -1}
 		}
 		grace.Stop()
 	}
@@ -265,7 +269,7 @@ func (s *Session) run(job *command) {
 	s.mu.Lock()
 	s.executor, s.active, s.status = nil, nil, StatusIdle
 	s.mu.Unlock()
-	s.finish(job, exitCode)
+	s.finishResult(job, result)
 }
 
 // Execute is the ownerless API for in-process callers. Explicit Drain still
