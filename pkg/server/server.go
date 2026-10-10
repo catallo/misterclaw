@@ -497,7 +497,11 @@ func (s *Server) handleMiSTer(req Request, send func(interface{})) {
 			return
 		}
 
-		err := s.launchGame(*game)
+		// Reject unsafe ZIP-member requests before any native launch callback.
+		err := mister.ValidateZIPGame(*game)
+		if err == nil {
+			err = s.launchGame(*game)
+		}
 		if err != nil {
 			send(map[string]interface{}{
 				"mister":  "launch",

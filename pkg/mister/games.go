@@ -58,9 +58,11 @@ type SystemStats struct {
 
 var systemDefaults = map[string]SystemConfig{
 	// === Consoles ===
-	"Gameboy":         {Core: "_Console/Gameboy", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gb"}},
-	"GBC":             {Core: "_Console/Gameboy", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gbc"}, SetName: "GBC"},
-	"GBA":             {Core: "_Console/GBA", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gba"}},
+	"Gameboy": {Core: "_Console/Gameboy", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gb"}},
+	"GBC":     {Core: "_Console/Gameboy", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gbc"}, SetName: "GBC"},
+	"GBA":     {Core: "_Console/GBA", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gba"}},
+	// GBA2P uses its own core/config/save namespace; slot 1 loads one cartridge.
+	"GBA2P":           {Core: "_Console/GBA2P", Delay: 2, Type: "f", Index: 1, Extensions: []string{".gba"}},
 	"NES":             {Core: "_Console/NES", Delay: 2, Type: "f", Index: 1, Extensions: []string{".nes"}},
 	"SNES":            {Core: "_Console/SNES", Delay: 2, Type: "f", Index: 0, Extensions: []string{".sfc", ".smc"}},
 	"Genesis":         {Core: "_Console/MegaDrive", Delay: 1, Type: "f", Index: 1, Extensions: []string{".md", ".gen", ".bin"}},
@@ -162,6 +164,11 @@ func scanDir(dir, system, location string, extensions map[string]bool) []GameInf
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
+		// ZIP member discovery is explicit-path only. A bare archive is not
+		// injectable ROM media, except for profiles such as NeoGeo ROM sets.
+		if ext == ".zip" && !supportsDirectZIP(system) {
+			return nil
+		}
 		if extensions[ext] {
 			name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 			games = append(games, GameInfo{
@@ -260,6 +267,11 @@ func SearchGames(query string, system string) []GameInfo {
 
 	var results []GameInfo
 	for _, g := range source {
+		// Older persisted caches may contain physical ZIPs for cartridge
+		// profiles. Do not auto-launch those as bare ROM files either.
+		if strings.EqualFold(filepath.Ext(g.Path), ".zip") && !supportsDirectZIP(g.System) {
+			continue
+		}
 		nameLower := strings.ToLower(g.Name)
 		match := true
 		for _, term := range terms {
@@ -310,9 +322,17 @@ func GenerateMGL(game GameInfo) string {
 		return ""
 	}
 
-	// MGL paths are relative to the MGL file location (/tmp/).
-	// We go up 5 levels to be safe (mrext convention), then use absolute path.
+	// Preserve the legacy relative-path convention for physical files.
 	mglPath := "../../../../.." + game.Path
+	if isPhysicalZIPMemberPath(game.Path) {
+		// Native MGL and file-injection buffers hold 1024 bytes, including
+		// the terminator. An absolute member path avoids both this prefix
+		// and Main's additional HomeDir prefix, preserving the exact member.
+		if len(game.Path) > maxZIPPathBytes {
+			return ""
+		}
+		mglPath = game.Path
+	}
 
 	mglType := cfg.Type
 	mglIndex := cfg.Index
@@ -374,9 +394,10 @@ func LaunchCoreName(game GameInfo) string {
 
 // LaunchGame writes an MGL file or loads an arcade MRA directly.
 func LaunchGame(game GameInfo) error {
-	// Verify ROM file exists before attempting to launch
-	if _, err := os.Stat(game.Path); err != nil {
-		return fmt.Errorf("ROM not found: %s", game.Path)
+	// Validate virtual archive members before writing descriptors or loading
+	// a core. Ordinary files and direct ROM-set archives keep their behavior.
+	if err := ValidateGameMedia(game); err != nil {
+		return err
 	}
 
 	// Arcade MRA files: load directly (MiSTer parses <rbf> from the MRA)
